@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 # Import what we need from the POE namespace
 use POE;			# For the constants
@@ -327,11 +327,12 @@ sub Got_Connection {
 	my( $socket, $remote_address, $remote_port ) = @_[ ARG0 .. ARG2 ];
 
 	# Create the connection object
-	my $connection = POE::Component::Server::SimpleHTTP::Connection->new();
-	$connection->{'Remote_IP'} = inet_ntoa( $remote_address );
-	$connection->{'Remote_Port'} = $remote_port;
-	$connection->{'Remote_Addr'} = getpeername( $socket );
-	$connection->{'Local_Addr'} = getsockname( $socket );
+	my $connection = POE::Component::Server::SimpleHTTP::Connection->new(
+		inet_ntoa( $remote_address ),
+		$remote_port,
+		getpeername( $socket ),
+		getsockname( $socket )
+	);
 
 	# Set up the Wheel to read from the socket
 	my $wheel = POE::Wheel::ReadWrite->new(
@@ -412,7 +413,7 @@ sub Got_Flush {
 
 	# Debug stuff
 	if ( DEBUG ) {
-	    warn "Got Flush event for wheel ID ( $id )";
+		warn "Got Flush event for wheel ID ( $id )";
 	}
 
 	# Check if we are shutting down
@@ -465,7 +466,13 @@ sub Got_Output {
 	}
 
 	# Send it out!
-	$_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->put( $response );
+	# Bug reported by Tim Wood
+	eval { $_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->put( $response ) };
+	if ( $@ ) {
+		if ( DEBUG ) {
+			warn 'Tried to send data over a closed/nonexistant socket!';
+		}
+	}
 
 	# Mark this socket done
 	$_[HEAP]->{'WHEELS'}->{ $wheel }->[2] = 1;
@@ -586,6 +593,11 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.04
+
+	Fixed a bug reported by Tim Wood about socket disappearing
+	Fixed *another* bug in the Connection object, pesky CaPs! ( Again, reported by Tim Wood )
 
 =head2 1.03
 

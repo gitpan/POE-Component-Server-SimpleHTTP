@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 
 # Creates a new instance!
 sub new {
@@ -14,10 +14,10 @@ sub new {
 	my $self = {};
 
 	# Set stuff
-	$self->{'remote_ip'} = undef;
-	$self->{'remote_port'} = undef;
-	$self->{'remote_addr'} = undef;
-	$self->{'local_addr'} = undef;
+	$self->{'remote_ip'} = shift;
+	$self->{'remote_port'} = shift;
+	$self->{'remote_addr'} = shift;
+	$self->{'local_addr'} = shift;
 
 	# Bless ourself!
 	bless( $self, 'POE::Component::Server::SimpleHTTP::Connection' );
