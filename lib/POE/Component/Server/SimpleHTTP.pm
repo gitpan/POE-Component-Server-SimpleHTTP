@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.05';
+our $VERSION = '1.06';
 
 # Import what we need from the POE namespace
 use POE;
@@ -69,6 +69,11 @@ sub new {
 
 		# Set the default
 		$ALIAS = 'SimpleHTTP';
+
+		# Get rid of any lingering ALIAS
+		if ( exists $opt{'ALIAS'} ) {
+			delete $opt{'ALIAS'};
+		}
 	}
 
 	# Get the PORT
@@ -99,6 +104,11 @@ sub new {
 		# Figure out the hostname
 		require Sys::Hostname;
 		$HOSTNAME = Sys::Hostname::hostname();
+
+		# Get rid of any lingering HOSTNAME
+		if ( exists $opt{'HOSTNAME'} ) {
+			delete $opt{'HOSTNAME'};
+		}
 	}
 
 	# Get the HEADERS
@@ -113,6 +123,11 @@ sub new {
 	} else {
 		# Set to none
 		$HEADERS = {};
+
+		# Get rid of any lingering HEADERS
+		if ( exists $opt{'HEADERS'} ) {
+			delete $opt{'HEADERS'};
+		}
 	}
 
 	# Get the HANDLERS
@@ -161,6 +176,9 @@ sub new {
 
 			# Send output to connection!
 			'DONE'		=>	\&Got_Output,
+
+			# Kill the connection!
+			'CLOSE'		=>	\&CloseConnection,
 		},
 
 		# Set up the heap for ourself
@@ -320,8 +338,12 @@ sub StopServer {
 
 	# Forcibly close all sockets that are open
 	foreach my $conn ( values %{ $_[HEAP]->{'WHEELS'} } ) {
-		$conn->[0]->shutdown_input;
-		$conn->[0]->shutdown_output;
+		# Can't call method "shutdown_input" on an undefined value at
+		# /usr/lib/perl5/site_perl/5.8.2/POE/Component/Server/SimpleHTTP.pm line 323.
+		if ( defined $conn->[0] and defined $conn->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+			$conn->[0]->shutdown_input;
+			$conn->[0]->shutdown_output;
+		}
 	}
 
 	# Delete our alias
@@ -346,7 +368,7 @@ sub Got_Connection {
 
 	# Set up the Wheel to read from the socket
 	my $wheel = POE::Wheel::ReadWrite->new(
-		'Handle'	=>	$socket,
+	'Handle'	=>	$socket,
 		'Driver'	=>	POE::Driver::SysRW->new(),
 		'Filter'	=>	POE::Filter::HTTPD->new(),
 		'InputEvent'	=>	'Got_Input',
@@ -548,6 +570,38 @@ sub Got_Output {
 	}
 }
 
+# Closes the connection
+sub CloseConnection {
+	# ARG0 = HTTP::Response object
+	my $response = $_[ ARG0 ];
+
+	# Check if we got it
+	if ( ! defined $response or ! UNIVERSAL::isa( $response, 'HTTP::Response' ) ) {
+		if ( DEBUG ) {
+			warn 'Did not get a HTTP::Response object!';
+		}
+
+		# Abort...
+		return undef;
+	}
+
+	# Get the wheel ID
+	my $wheel = $response->_WHEEL;
+
+	# Kill it!
+	if ( defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0] and defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+		$_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->shutdown_input;
+		$_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->shutdown_output;
+	}
+
+	# Delete it!
+	delete $_[HEAP]->{'WHEELS'}->{ $wheel }->[0];
+	delete $_[HEAP]->{'WHEELS'}->{ $wheel };
+
+	# All done!
+	return 1;
+}
+
 # Got some sort of error from ReadWrite
 sub Got_Error {
 	# ARG0 = operation, ARG1 = error number, ARG2 = error string, ARG3 = wheel ID
@@ -608,6 +662,11 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 				'EVENT'		=>	'GOT_MAIN',
 			},
 			{
+				'DIR'		=>	'^/foo/.*',
+				'SESSION'	=>	'HTTP_GET',
+				'EVENT'		=>	'GOT_NULL',
+			},
+			{
 				'DIR'		=>	'.*',
 				'SESSION'	=>	'HTTP_GET',
 				'EVENT'		=>	'GOT_ERROR',
@@ -625,6 +684,7 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 			'GOT_BAR'	=>	\&GOT_REQ,
 			'GOT_MAIN'	=>	\&GOT_REQ,
 			'GOT_ERROR'	=>	\&GOT_ERR,
+			'GOT_NULL'	=>	\&GOT_NULL,
 			'GOT_HANDLERS'	=>	\&GOT_HANDLERS,
 		},
 	);
@@ -641,6 +701,14 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 
 		# Send it off!
 		$_[KERNEL]->post( 'HTTPD', 'SETHANDLERS', $handlers );
+	}
+
+	sub GOT_NULL {
+		# ARG0 = HTTP::Request object, ARG1 = HTTP::Response object, ARG2 = the DIR that matched
+		my( $request, $response, $dirmatch ) = @_[ ARG0 .. ARG2 ];
+
+		# Kill this!
+		$_[KERNEL]->post( 'HTTPD', 'CLOSE', $response );
 	}
 
 	sub GOT_REQ {
@@ -680,6 +748,12 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.06
+
+	Fixed SHUTDOWN to cleanly kill sockets, checking for definedness first
+	Fixed new() to remove options that exist, but is undef -> results in croaking when DEBUG is on
+	Added the CLOSE event to kill sockets without sending any output
 
 =head2 1.05
 
@@ -823,7 +897,7 @@ is a "catch-all" DIR regex like '.*', it will catch the errors, and only that on
 
 =head2 Events
 
-SimpleHTTP is so simple, there are only 4 events available.
+SimpleHTTP is so simple, there are only 5 events available.
 
 =over 4
 
@@ -840,6 +914,12 @@ SimpleHTTP is so simple, there are only 4 events available.
 
 	To get greater throughput and response time, do not post() to the DONE event, call() it!
 	However, this will force your program to block while servicing web requests...
+
+=item C<CLOSE>
+
+	This event accepts only one argument: the HTTP::Response object we sent to the handler.
+
+	Calling this event will close the socket, not sending any output
 
 =item C<GETHANDLERS>
 

@@ -31,3 +31,8 @@ Revision history for Perl extension POE::Component::Server::SimpleHTTP.
 	- Benchmarked and found a significant speed difference between post()ing and call()ing the DONE event
 		->	The call() method is ~8% faster
 		->	However, the chance of connecting sockets timing out is greater...
+
+1.06 Mon May 03 15:45:18 2004
+	- Fixed SHUTDOWN to cleanly kill sockets, checking for definedness first
+	- Fixed new() to remove options that exist, but is undef -> results in croaking when DEBUG is on
+	- Added the CLOSE event to kill sockets without sending any output
