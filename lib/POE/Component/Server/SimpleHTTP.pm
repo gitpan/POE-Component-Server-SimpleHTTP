@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 
 # Import what we need from the POE namespace
 use POE;			# For the constants
@@ -129,46 +129,6 @@ sub new {
 		croak( 'HANDLERS is required to create a new POE::Component::Server::SimpleHTTP instance!' );
 	}
 
-	# Massage the handlers
-	my $count = 0;
-	while ( $count < scalar( @$HANDLERS ) ) {
-		# Must be ref to hash
-		if ( ref( $HANDLERS->[ $count ] ) and ref( $HANDLERS->[ $count ] ) eq 'HASH' ) {
-			# Make sure it got the 3 parts necessary
-			if ( ! exists $HANDLERS->[ $count ]->{'SESSION'} or ! defined $HANDLERS->[ $count ]->{'SESSION'} ) {
-				croak( "HANDLER number $count does not have a SESSION argument!" );
-			}
-			if ( ! exists $HANDLERS->[ $count ]->{'EVENT'} or ! defined $HANDLERS->[ $count ]->{'EVENT'} ) {
-				croak( "HANDLER number $count does not have an EVENT argument!" );
-			}
-			if ( ! exists $HANDLERS->[ $count ]->{'DIR'} or ! defined $HANDLERS->[ $count ]->{'DIR'} ) {
-				croak( "HANDLER number $count does not have a DIR argument!" );
-			}
-
-			# Convert SESSION to ID
-			if ( UNIVERSAL::isa( $HANDLERS->[ $count ]->{'SESSION'}, 'POE::Session') ) {
-				$HANDLERS->[ $count ]->{'SESSION'} = $HANDLERS->[ $count ]->{'SESSION'}->ID;
-			}
-
-			# Convert DIR to qr// format
-			my $regex = undef;
-			eval { $regex = qr/$HANDLERS->[ $count ]->{'DIR'}/ };
-
-			# Check for errors
-			if ( $@ ) {
-				croak( "HANDLER number $count has a malformed DIR -> $@" );
-			} else {
-				# Store it!
-				$HANDLERS->[ $count ]->{'RE'} = $regex;
-			}
-		} else {
-			croak( "HANDLER number $count is not a reference to a HASH!" );
-		}
-
-		# Done with this one!
-		$count++;
-	}
-
 	# Create a new session for ourself
 	POE::Session->create(
 		# Our subroutines
@@ -177,6 +137,10 @@ sub new {
 			'_start'	=>	\&StartServer,
 			'_stop'		=>	sub {},
 			'_child'	=>	sub {},
+
+			# HANDLER stuff
+			'GETHANDLERS'	=>	\&GetHandlers,
+			'SETHANDLERS'	=>	\&SetHandlers,
 
 			# Shutdown event
 			'SHUTDOWN'	=>	\&StopServer,
@@ -206,10 +170,49 @@ sub new {
 	return 1;
 }
 
+# Gets the HANDLERS
+sub GetHandlers {
+	# ARG0 = session, ARG1 = event
+	my( $session, $event ) = @_[ ARG0, ARG1 ];
+
+	# Validation
+	if ( ! defined $session or ! defined $event ) {
+		return undef;
+	}
+
+	# Make a deep copy of the handlers
+	require Storable;
+
+	my $handlers = Storable::dclone( $_[HEAP]->{'HANDLERS'} );
+
+	# Remove the RE part
+	foreach my $ary ( @$handlers ) {
+		delete $ary->{'RE'};
+	}
+
+	# All done!
+	$_[KERNEL]->post( $_[ARG0], $_[ARG1], $handlers );
+}
+
+# Sets the HANDLERS
+sub SetHandlers {
+	# ARG0 = ref to handlers array
+	my $handlers = $_[ARG0];
+
+	# Validate it...
+	MassageHandlers( $handlers );
+
+	# If we got here, passed tests!
+	$_[HEAP]->{'HANDLERS'} = $handlers;
+}
+
 # Starts the server!
 sub StartServer {
 	# Register an alias for ourself
 	$_[KERNEL]->alias_set( $_[HEAP]->{'ALIAS'} );
+
+	# Massage the handlers!
+	MassageHandlers( $_[HEAP]->{'HANDLERS'} );
 
 	# Set up the HTTPD Daemon!
 	POE::Component::Server::TCP->new(
@@ -226,6 +229,57 @@ sub StartServer {
 
 	# All done!
 	return 1;
+}
+
+# This subroutine massages the HANDLERS for internal use
+sub MassageHandlers {
+	# Get the ref to handlers
+	my $handler = shift;
+
+	# Make sure it is ref to array
+	if ( ! ref( $handler ) or ref( $handler ) ne 'ARRAY' ) {
+		croak( "HANDLERS is not a ref to an array!" );
+	}
+
+	# Massage the handlers
+	my $count = 0;
+	while ( $count < scalar( @$handler ) ) {
+		# Must be ref to hash
+		if ( ref( $handler->[ $count ] ) and ref( $handler->[ $count ] ) eq 'HASH' ) {
+			# Make sure it got the 3 parts necessary
+			if ( ! exists $handler->[ $count ]->{'SESSION'} or ! defined $handler->[ $count ]->{'SESSION'} ) {
+				croak( "HANDLER number $count does not have a SESSION argument!" );
+			}
+			if ( ! exists $handler->[ $count ]->{'EVENT'} or ! defined $handler->[ $count ]->{'EVENT'} ) {
+				croak( "HANDLER number $count does not have an EVENT argument!" );
+			}
+			if ( ! exists $handler->[ $count ]->{'DIR'} or ! defined $handler->[ $count ]->{'DIR'} ) {
+				croak( "HANDLER number $count does not have a DIR argument!" );
+			}
+
+			# Convert SESSION to ID
+			if ( UNIVERSAL::isa( $handler->[ $count ]->{'SESSION'}, 'POE::Session') ) {
+				$handler->[ $count ]->{'SESSION'} = $handler->[ $count ]->{'SESSION'}->ID;
+			}
+
+			# Convert DIR to qr// format
+			my $regex = undef;
+			eval { $regex = qr/$handler->[ $count ]->{'DIR'}/ };
+
+			# Check for errors
+			if ( $@ ) {
+				croak( "HANDLER number $count has a malformed DIR -> $@" );
+			} else {
+				# Store it!
+				$handler->[ $count ]->{'RE'} = $regex;
+			}
+		} else {
+			croak( "HANDLER number $count is not a reference to a HASH!" );
+		}
+
+		# Done with this one!
+		$count++;
+	}
 }
 
 # Stops the server!
@@ -478,16 +532,30 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	# Create our own session to receive events from SimpleHTTP
 	POE::Session->create(
 		inline_states => {
-			'_start'	=>	sub { $_[KERNEL]->alias_set( 'HTTP_GET' ) },
+			'_start'	=>	sub {	$_[KERNEL]->alias_set( 'HTTP_GET' );
+							$_[KERNEL]->post( 'HTTPD', 'GETHANDLERS', $_[SESSION], 'GOT_HANDLERS' );
+						},
 
 			'GOT_BAR'	=>	\&GOT_REQ,
 			'GOT_MAIN'	=>	\&GOT_REQ,
 			'GOT_ERROR'	=>	\&GOT_ERR,
+			'GOT_HANDLERS'	=>	\&GOT_HANDLERS,
 		},
 	);
 
 	# Start POE!
 	POE::Kernel->run();
+
+	sub GOT_HANDLERS {
+		# ARG0 = HANDLERS array
+		my $handlers = $_[ ARG0 ];
+
+		# Move the first handler to the last one
+		push( @$handlers, shift( @$handlers ) );
+
+		# Send it off!
+		$_[KERNEL]->post( 'HTTPD', 'SETHANDLERS', $handlers );
+	}
 
 	sub GOT_REQ {
 		# ARG0 = HTTP::Request object, ARG1 = HTTP::Response object, ARG2 = the DIR that matched
@@ -507,7 +575,7 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 
 		# Do our stuff to HTTP::Response
 		$response->code( 404 );
-		$response->content( "Hi visitor from " . $request->connection->Remote_IP . ", Page not found -> '" . $request->uri->path . "'" );
+		$response->content( "Hi visitor from " . $request->connection->remote_ip . ", Page not found -> '" . $request->uri->path . "'" );
 
 		# We are done!
 		$_[KERNEL]->post( 'HTTPD', 'DONE', $response );
@@ -518,6 +586,12 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.03
+
+	Added the GETHANDLERS/SETHANDLERS event
+	POD updates
+	Fixed SimpleHTTP::Connection to get rid of the funky CaPs
 
 =head2 1.02
 
@@ -592,11 +666,12 @@ For more information, consult the L<HTTP::Headers> module.
 
 This is the hardest part of SimpleHTTP :)
 
-You supply an array, with each element being a hash.
-All the hashes should contain those 3 keys:
+You supply an array, with each element being a hash. All the hashes should contain those 3 keys:
 
 DIR	->	The regexp that will be used, more later.
+
 SESSION	->	The session to send the input
+
 EVENT	->	The event to trigger
 
 The DIR key should be a valid regexp. This will be matched against the current request path.
@@ -604,9 +679,9 @@ Pseudocode is: if ( $path =~ /$DIR/ )
 
 NOTE: The path is UNIX style, not MSWIN style ( /blah/foo not \blah\foo )
 
-Now, if you supply 100 handlers, how will SimpleHTTP know what to do? Simple!
-By passing in an array in the first place, you have already told SimpleHTTP the order of your handlers.
-They will be tried in order, and if one is not found, SimpleHTTP will DIE!
+Now, if you supply 100 handlers, how will SimpleHTTP know what to do? Simple! By passing in an array in the first place,
+you have already told SimpleHTTP the order of your handlers. They will be tried in order, and if one is not found,
+SimpleHTTP will DIE!
 
 This allows some cool things like specifying 3 handlers with DIR of:
 '^/foo/.*', '^/$', '.*'
@@ -617,8 +692,11 @@ NOTE: You might get weird Session/Events, make sure your handlers are in order, 
 The 2nd handler will NEVER get any requests, as the first one will match ( no $ in the regex )
 
 Now, here's what a handler receives:
+
 ARG0 -> HTTP::Request object
+
 ARG1 -> HTTP::Response object
+
 ARG2 -> The exact DIR that matched, so you can see what triggered what
 
 Note: Technically, the HTTP objects are POE::Component::Server::SimpleHTTP::* objects...
@@ -629,7 +707,7 @@ See the POD for L<POE::Component::Server::SimpleHTTP::Request> and L<POE::Compon
 
 =head2 Events
 
-SimpleHTTP is so simple, there are only 2 events available.
+SimpleHTTP is so simple, there are only 4 events available.
 
 =over 4
 
@@ -643,6 +721,20 @@ SimpleHTTP is so simple, there are only 2 events available.
 		Date		->	Current date stringified via HTTP::Date
 		Content-Type	->	text/html
 		Content-Length	->	length( $response->content )
+
+=item C<GETHANDLERS>
+
+	This event accepts 2 arguments: The session + event to send the response to
+
+	This event will send back the current HANDLERS array ( deep-cloned via Storable::dclone )
+
+	The resulting array can be played around to your tastes, then once you are done...
+
+=item C<SETHANDLERS>
+
+	This event accepts only one argument: pointer to HANDLERS array
+
+	BEWARE: if there is an error in the HANDLERS, SimpleHTTP will die!
 
 =item C<SHUTDOWN>
 
@@ -663,6 +755,7 @@ You can enable debugging mode by doing this:
 
 For those who are pondering about basic-authentication, here's a tiny snippet to put in the Event handler
 
+	# Contributed by Rocco Caputo
 	sub Got_Request {
 		# ARG0 = HTTP::Request, ARG1 = HTTP::Response
 		my( $request, $response ) = @_[ ARG0, ARG1 ];
@@ -673,7 +766,7 @@ For those who are pondering about basic-authentication, here's a tiny snippet to
 		# Decide what to do
 		if ( ! defined $login or ! defined $password ) {
 			# Set the authorization
-			$response->header( 'WWW-Authenticate' => 'Basic realm="MyRealm" );
+			$response->header( 'WWW-Authenticate' => 'Basic realm="MyRealm"' );
 			$response->code( 401 );
 			$response->content( 'FORBIDDEN.' );
 
@@ -690,15 +783,21 @@ Nothing.
 
 =head1 SEE ALSO
 
-	L<POE>
-	L<POE::Component::Server::HTTP>
-	L<POE::Filter::HTTPD>
-	L<HTTP::Request>
-	L<HTTP::Response>
+L<POE>
 
-	L<POE::Component::Server::SimpleHTTP::Connection>
-	L<POE::Component::Server::SimpleHTTP::Request>
-	L<POE::Component::Server::SimpleHTTP::Response>
+L<POE::Component::Server::HTTP>
+
+L<POE::Filter::HTTPD>
+
+L<HTTP::Request>
+
+L<HTTP::Response>
+
+L<POE::Component::Server::SimpleHTTP::Connection>
+
+L<POE::Component::Server::SimpleHTTP::Request>
+
+L<POE::Component::Server::SimpleHTTP::Response>
 
 =head1 AUTHOR
 

@@ -1,4 +1,4 @@
-POE/Component/Server/SimpleHTTP version 1.02
+POE/Component/Server/SimpleHTTP version 1.03
 ============================================
 
 INSTALLATION
@@ -31,6 +31,8 @@ This module requires these other modules and libraries:
 	Socket
 
 	Sys::Hostname
+
+	Storable
 
 COPYRIGHT AND LICENSE
 

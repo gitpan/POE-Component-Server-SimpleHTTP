@@ -18,6 +18,7 @@ WriteMakefile(
 		'POE::Filter::Stream'		=>	0,
 		'POE::Filter::HTTPD'		=>	0,
 		'POE::Component::Server::TCP'	=>	0,
+		'Storable'			=>	0,
 	},
 	'ABSTRACT_FROM'	=> 'lib/POE/Component/Server/SimpleHTTP.pm', # retrieve abstract from module
 	'AUTHOR'	=> 'Apocalypse <APOCAL@cpan.org>',
