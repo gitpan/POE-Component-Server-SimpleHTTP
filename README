@@ -1,4 +1,4 @@
-POE/Component/Server/SimpleHTTP version 1.09
+POE/Component/Server/SimpleHTTP version 1.10
 ============================================
 
 INSTALLATION
@@ -31,6 +31,8 @@ This module requires these other modules and libraries:
 	Sys::Hostname
 
 	Storable
+
+	POE::Component::SSLify
 
 COPYRIGHT AND LICENSE
 

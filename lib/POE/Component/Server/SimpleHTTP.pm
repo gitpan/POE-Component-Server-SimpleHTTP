@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.09';
+our $VERSION = '1.10';
 
 # Import what we need from the POE namespace
 use POE;
@@ -52,10 +52,39 @@ sub new {
 	my %opt = @_;
 
 	# Our own options
-	my ( $ALIAS, $ADDRESS, $PORT, $HOSTNAME, $HEADERS, $HANDLERS );
+	my ( $ALIAS, $ADDRESS, $PORT, $HOSTNAME, $HEADERS, $HANDLERS, $SSLKEYCERT );
 
 	# You could say I should do this: $Stuff = delete $opt{'Stuff'}
 	# But, that kind of behavior is not defined, so I would not trust it...
+
+	# Get the SSL array
+	if ( exists $opt{'SSLKEYCERT'} and defined $opt{'SSLKEYCERT'} ) {
+		# Test if it is an array
+		if ( ref( $opt{'SSLKEYCERT'} ) eq 'ARRAY' and scalar( @{ $opt{'SSLKEYCERT'} } ) == 2 ) {
+			$SSLKEYCERT = $opt{'SSLKEYCERT'};
+			delete $opt{'SSLKEYCERT'};
+
+			# Okay, pull in what is necessary
+			eval {
+				use POE::Component::SSLify qw( SSLify_Options SSLify_GetSocket Server_SSLify SSLify_GetCipher );
+				SSLify_Options( @$SSLKEYCERT );
+			};
+			if ( $@ ) {
+				if ( DEBUG ) {
+					warn "Unable to load PoCo::SSLify -> $@";
+				}
+
+				# Force ourself to not use SSL
+				$SSLKEYCERT = undef;
+			}
+		} else {
+			if ( DEBUG ) {
+				warn 'The SSLKEYCERT option must be an array with exactly 2 elements in it!';
+			}
+		}
+	} else {
+		$SSLKEYCERT = undef;
+	}
 
 	# Get the session alias
 	if ( exists $opt{'ALIAS'} and defined $opt{'ALIAS'} and length( $opt{'ALIAS'} ) ) {
@@ -144,8 +173,8 @@ sub new {
 	}
 
 	# Anything left over is unrecognized
-	if ( keys %opt > 0 ) {
-		if ( DEBUG ) {
+	if ( DEBUG ) {
+		if ( keys %opt > 0 ) {
 			croak( 'Unrecognized options were present in POE::Component::Server::SimpleHTTP->new -> ' . join( ', ', keys %opt ) );
 		}
 	}
@@ -193,7 +222,7 @@ sub new {
 			'HANDLERS'	=>	$HANDLERS,
 			'REQUESTS'	=>	{},
 			'RETRIES'	=>	0,
-			'AUTODIE'	=>	1,
+			'SSLKEYCERT'	=>	$SSLKEYCERT,
 		},
 	) or die 'Unable to create a new session!';
 
@@ -206,7 +235,7 @@ sub FindRequestLeaks {
 	# Loop through all of the requests
 	foreach my $req ( keys %{ $_[HEAP]->{'REQUESTS'} } ) {
 		# Bite the programmer!
-		warn 'Did not get DONE/CLOSE event for Wheel ID ' . $req->[0]->ID . ' from IP ' . $req->[2]->connection->remote_ip;
+		warn 'Did not get DONE/CLOSE event for Wheel ID ' . $req . ' from IP ' . $_[HEAP]->{'REQUESTS'}->{ $req }->[2]->connection->remote_ip;
 	}
 
 	# All done!
@@ -247,19 +276,16 @@ sub StopServer {
 
 	# Are we gracefully shutting down or not?
 	if ( defined $_[ARG0] and $_[ARG0] eq 'GRACEFUL' ) {
-		# Check if we should shutdown if no requests
-		if ( $_[HEAP]->{'AUTODIE'} ) {
-			# Check for number of requests
-			if ( keys( %{ $_[HEAP]->{'REQUESTS'} } ) == 0 ) {
-				# Alright, shutdown anyway
+		# Check for number of requests
+		if ( keys( %{ $_[HEAP]->{'REQUESTS'} } ) == 0 ) {
+			# Alright, shutdown anyway
 
-				# Delete our alias
-				$_[KERNEL]->alias_remove( $_[HEAP]->{'ALIAS'} );
+			# Delete our alias
+			$_[KERNEL]->alias_remove( $_[HEAP]->{'ALIAS'} );
 
-				# Debug stuff
-				if ( DEBUG ) {
-					warn 'Stopped SimpleHTTP gracefully, no requests left';
-				}
+			# Debug stuff
+			if ( DEBUG ) {
+				warn 'Stopped SimpleHTTP gracefully, no requests left';
 			}
 		}
 
@@ -342,22 +368,12 @@ sub ListenerError {
 
 # Starts listening on the socket
 sub StartListen {
-	# Check if we already have an socketfactory wheel
-	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
-		# Debug stuff
-		if ( DEBUG ) {
-			warn 'STARTLISTEN was called, but we were listening!';
-		}
-
-		# All done!
-		return 1;
+	if ( DEBUG ) {
+		warn 'STARTLISTEN called, resuming accepts on SocketFactory';
 	}
 
-	# Call SetupListener and tell it to not increment the retry counter
+	# Setup the SocketFactory wheel
 	$_[KERNEL]->call( $_[SESSION], 'SetupListener', 'NOINC' );
-
-	# Tell the flush event to signal shutdown if no requests left
-	$_[HEAP]->{'AUTODIE'} = 1;
 
 	# All done!
 	return 1;
@@ -365,11 +381,14 @@ sub StartListen {
 
 # Stops listening on the socket
 sub StopListen {
-	# Simply call SHUTDOWN with an argument
-	$_[KERNEL]->call( 'SHUTDOWN', 'GRACEFUL' );
+	if ( DEBUG ) {
+		warn 'STOPLISTEN called, pausing accepts on SocketFactory';
+	}
 
-	# Tell the flush event to NOT signal shutdown if no requests left
-	$_[HEAP]->{'AUTODIE'} = 0;
+	# We have to get rid of the SocketFactory wheel...
+	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+		$_[HEAP]->{'SOCKETFACTORY'} = undef;
+	}
 
 	# All done!
 	return 1;
@@ -385,6 +404,9 @@ sub SetHandlers {
 
 	# If we got here, passed tests!
 	$_[HEAP]->{'HANDLERS'} = $handlers;
+
+	# All done!
+	return 1;
 }
 
 # Gets the HANDLERS
@@ -409,6 +431,9 @@ sub GetHandlers {
 
 	# All done!
 	$_[KERNEL]->post( $session, $event, $handlers );
+
+	# All done!
+	return 1;
 }
 
 # This subroutine massages the HANDLERS for internal use
@@ -460,12 +485,26 @@ sub MassageHandlers {
 		# Done with this one!
 		$count++;
 	}
+
+	# Got here, success!
+	return 1;
 }
 
 # The actual manager of connections
 sub Got_Connection {
 	# ARG0 = Socket, ARG1 = Remote Address, ARG2 = Remote Port
 	my $socket = $_[ ARG0 ];
+
+	# Should we SSLify it?
+	if ( defined $_[HEAP]->{'SSLKEYCERT'} ) {
+		# SSLify it!
+		eval { $socket = Server_SSLify( $socket ) };
+		if ( $@ ) {
+			warn "Unable to turn on SSL for connection from " . Socket::inet_ntoa( $_[ARG1] ) . " -> $@";
+			close $socket;
+			return 1;
+		}
+	}
 
 	# Set up the Wheel to read from the socket
 	my $wheel = POE::Wheel::ReadWrite->new(
@@ -528,7 +567,12 @@ sub Got_Input {
 		$response->{'WHEEL_ID'} = $id;
 
 		# Directly access POE::Wheel::ReadWrite's HANDLE_INPUT -> to get the socket itself
-		$response->{'CONNECTION'} = POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
+		# Hmm, if we are SSL, then have to do an extra step!
+		if ( defined $_[HEAP]->{'SSLKEYCERT'} ) {
+			$response->{'CONNECTION'} = POE::Component::Server::SimpleHTTP::Connection->new( SSLify_GetSocket( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) );
+		} else {
+			$response->{'CONNECTION'} = POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
+		}
 
 		# Set the path to an empty string
 		$path = '';
@@ -548,10 +592,18 @@ sub Got_Input {
 
 		# Get the response
 		# Directly access POE::Wheel::ReadWrite's HANDLE_INPUT -> to get the socket itself
-		$response = POE::Component::Server::SimpleHTTP::Response->new(
-			$id,
-			POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] )
-		);
+		# Hmm, if we are SSL, then have to do an extra step!
+		if ( defined $_[HEAP]->{'SSLKEYCERT'} ) {
+			$response = POE::Component::Server::SimpleHTTP::Response->new(
+				$id,
+				POE::Component::Server::SimpleHTTP::Connection->new( SSLify_GetSocket( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) )
+			);
+		} else {
+			$response = POE::Component::Server::SimpleHTTP::Response->new(
+				$id,
+				POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] )
+			);
+		}
 
 		# Stuff the default headers
 		$response->header( %{ $_[HEAP]->{'HEADERS'} } );
@@ -565,6 +617,14 @@ sub Got_Input {
 
 		# All done!
 		return;
+	} else {
+		# If we used SSL, turn on the flag!
+		if ( defined $_[HEAP]->{'SSLKEYCERT'} ) {
+			$response->{'CONNECTION'}->{'SSLified'} = 1;
+
+			# Put the cipher type for people who want it
+			$response->{'CONNECTION'}->{'SSLCipher'} = SSLify_GetCipher( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
+		}
 	}
 
 	# Add this response to the wheel
@@ -619,13 +679,11 @@ sub Got_Flush {
 	}
 
 	# Alright, do we have to shutdown?
-	if ( $_[HEAP]->{'AUTODIE'} ) {
-		if ( ! exists $_[HEAP]->{'SOCKETFACTORY'} ) {
-			# Check to see if we have any more requests
-			if ( keys( %{ $_[HEAP]->{'REQUESTS'} } ) == 0 ) {
-				# Shutdown!
-				$_[KERNEL]->yield( 'SHUTDOWN' );
-			}
+	if ( ! exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+		# Check to see if we have any more requests
+		if ( keys( %{ $_[HEAP]->{'REQUESTS'} } ) == 0 ) {
+			# Shutdown!
+			$_[KERNEL]->yield( 'SHUTDOWN' );
 		}
 	}
 
@@ -770,6 +828,82 @@ sub Request_Close {
 	return 1;
 }
 
+# SSL-enables the connection
+sub Request_SSLify {
+	# ARG0 = HTTP::Response object
+	my $response = $_[ ARG0 ];
+
+	# Automatically fail if we don't have SSL
+	if ( ! defined $_[HEAP]->{'SSLKEYCERT'} ) {
+		if ( DEBUG ) {
+			warn 'Tried to SSLify a request, but was not able to load PoCo::SSLify';
+		}
+		return 1;
+	}
+
+	# Check if we got it
+	if ( ! defined $response or ! UNIVERSAL::isa( $response, 'HTTP::Response' ) ) {
+		if ( DEBUG ) {
+			warn 'Did not get a HTTP::Response object!';
+		}
+
+		# Abort...
+		return undef;
+	}
+
+	# Get the wheel ID
+	my $id = $response->_WHEEL;
+
+	# Check if the wheel exists ( sometimes it gets closed by the client, but the application doesn't know that... )
+	if ( ! exists $_[HEAP]->{'REQUESTS'}->{ $id } ) {
+		# Debug stuff
+		if ( DEBUG ) {
+			warn 'Wheel disappeared, but the application sent us a SSLify event, discarding it';
+		}
+
+		# All done!
+		return 1;
+	}
+
+	# Okay, convert it to SSL and redo the wheel!
+
+	# Hack ReadWrite so we can pause kernel read/write on it's socket
+	$_[KERNEL]->select( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
+	$_[KERNEL]->select( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] );
+
+	# Okay, replace the socket!
+	my $new_socket = undef;
+	eval {
+		$new_socket = POE::Component::SSLify::Server_SSLify( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] );
+	};
+	if ( $@ ) {
+		if ( DEBUG ) {
+			warn "Unable to SSLify -> $@";
+		}
+
+		# Just act as if nothing happened...
+		return 0;
+	}
+
+	# Replace the socket!
+	$_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] = $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] = $new_socket;
+
+	# Okay, tell the connection object that it is SSLified!
+	$_[HEAP]->{'REQUESTS'}->{ $id }->[2]->{'CONNECTION'}->{'SSLified'} = 1;
+
+	# Reinstate the read/write selects
+	$_[KERNEL]->select_write( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ], $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::STATE_WRITE ] );
+	$_[KERNEL]->select_read( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ], $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::STATE_READ ] );
+
+	# Pause the write select immediately, unless output is pending.
+	if ( ! $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::DRIVER_BUFFERED_OUT_OCTETS ] ) {
+		$_[KERNEL]->select_pause_write( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] );
+	}
+
+	# All done!
+	return 1;
+}
+
 # End of module
 1;
 
@@ -812,6 +946,9 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 				'EVENT'		=>	'GOT_ERROR',
 			},
 		],
+
+		# In the testing phase...
+		'SSLKEYCERT'	=>	[ 'public-key.pem', 'public-cert.pem' ],
 	) or die 'Unable to create the HTTP Server';
 
 	# Create our own session to receive events from SimpleHTTP
@@ -888,6 +1025,13 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.10
+
+	Rearranged some DEBUG printouts
+	Added some more 'return 1;' for POEization
+	Fixed STOPLISTEN/STARTLISTEN error
+	Added experimental SSL support via PoCo::SSLify
 
 =head2 1.09
 
@@ -993,7 +1137,7 @@ To start SimpleHTTP, just call it's new method:
 
 This method will die on error or return success.
 
-This constructor accepts only 6 options.
+This constructor accepts only 7 options.
 
 =over 4
 
@@ -1065,6 +1209,13 @@ is a "catch-all" DIR regex like '.*', it will catch the errors, and only that on
 
 NOTE: The only way SimpleHTTP will leak memory ( hopefully heh ) is if you discard the SimpleHTTP::Response object without sending it
 back to SimpleHTTP via the DONE/CLOSE events, so never do that!
+
+=item C<SSLKEYCERT>
+
+This should be an arrayref of only 2 elements - the public key and certificate location. Now, this is still in the experimental stage, and testing
+is greatly welcome!
+
+Again, this will automatically turn every incoming connection into a SSL socket. Once enough testing has been done, this option will be augmented with more SSL stuff!
 
 =back
 
@@ -1189,6 +1340,8 @@ Nothing.
 	L<POE::Component::Server::SimpleHTTP::Connection>
 
 	L<POE::Component::Server::SimpleHTTP::Response>
+
+	L<POE::Component::SSLify>
 
 =head1 AUTHOR
 

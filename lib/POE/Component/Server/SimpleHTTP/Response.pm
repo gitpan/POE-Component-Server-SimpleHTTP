@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 
 # Set our stuff to HTTP::Response
 use base qw( HTTP::Response );
@@ -45,20 +45,12 @@ sub new {
 
 # Gets the Wheel ID
 sub _WHEEL {
-	# Get ourself
-	my $self = shift;
-
-	# Return the ID
-	return $self->{'WHEEL_ID'};
+	return shift->{'WHEEL_ID'};
 }
 
 # Gets the connection object
 sub connection {
-	# Get ourself
-	my $self = shift;
-
-	# Return the conn object
-	return $self->{'CONNECTION'};
+	return shift->{'CONNECTION'};
 }
 
 # End of module
@@ -77,6 +69,10 @@ POE::Component::Server::SimpleHTTP::Response - Emulates a HTTP::Response object,
 	print $response->connection->remote_ip;
 
 =head1 CHANGES
+
+=head2 1.03
+
+	Removed some unnecessary variables
 
 =head2 1.02
 

@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.04';
+our $VERSION = '1.05';
 
 # Get some things we need
 use Socket qw( inet_ntoa unpack_sockaddr_in );
@@ -19,7 +19,13 @@ sub new {
 	# Create the hash
 	my $self = {
 		# Did the socket die?
-		'DIED'	=>	0,
+		'DIED'		=>	0,
+
+		# SSLification status
+		'SSLified'	=>	0,
+
+		# SSL cipher in use
+		'SSLCipher'	=>	undef,
 	};
 
 	# Get the stuff
@@ -49,65 +55,47 @@ sub new {
 
 # Gets the remote_ip
 sub remote_ip {
-	# Get ourself!
-	my $self = shift;
-
-	# Return the data
-	return $self->{'remote_ip'};
+	return shift->{'remote_ip'};
 }
 
 # Gets the remote_port
 sub remote_port {
-	# Get ourself!
-	my $self = shift;
-
-	# Return the data
-	return $self->{'remote_port'};
+	return shift->{'remote_port'};
 }
 
 # Gets the remote_addr
 sub remote_addr {
-	# Get ourself!
-	my $self = shift;
-
-	# Return the data
-	return $self->{'remote_addr'};
+	return shift->{'remote_addr'};
 }
 
 # Gets the local_addr
 sub local_addr {
-	# Get ourself!
-	my $self = shift;
-
-	# Return the data
-	return $self->{'local_addr'};
+	return shift->{'local_addr'};
 }
 
 # Gets the local_ip
 sub local_ip {
-	# Get ourself!
-	my $self = shift;
-
-	# Return the data
-	return $self->{'local_ip'};
+	return shift->{'local_ip'};
 }
 
 # Gets the local_port
 sub local_port {
-	# Get ourself!
-	my $self = shift;
-
-	# Return the data
-	return $self->{'local_port'};
+	return shift->{'local_port'};
 }
 
 # Boolean accessor to check if the socket is dead
 sub dead {
-	# Get ourself!
-	my $self = shift;
+	return shift->{'DIED'};
+}
 
-	# Return the data
-	return $self->{'DIED'};
+# Are we SSLified?
+sub ssl {
+	return shift->{'SSLified'};
+}
+
+# What ssl cipher is in use?
+sub sslcipher {
+	return shift->{'SSLCipher'};
 }
 
 # End of module
@@ -127,6 +115,11 @@ POE::Component::Server::SimpleHTTP::Connection - Stores connection information f
 	print $connection->remote_port;
 
 =head1 CHANGES
+
+=head2 1.05
+
+	Added a new accessor for SSLfication
+	Removed some unnecessary variables
 
 =head2 1.04
 
@@ -160,6 +153,8 @@ POE::Component::Server::SimpleHTTP::Connection - Stores connection information f
 	$connection->local_ip();	# Returns local ip in dotted quad format ( 1.1.1.1 )
 	$connection->local_port();	# Returns local port
 	$connection->dead();		# Returns a boolean value whether the socket is closed or not
+	$connection->ssl();		# Returns a boolean value whether the socket is SSLified or not
+	$connection->sslcipher();	# Returns the SSL Cipher type or undef if not SSL
 
 =head2 EXPORT
 
