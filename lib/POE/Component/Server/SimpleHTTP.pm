@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.08';
+our $VERSION = '1.09';
 
 # Import what we need from the POE namespace
 use POE;
@@ -235,16 +235,32 @@ sub StartServer {
 
 # Stops the server!
 sub StopServer {
+	# Shutdown the SocketFactory wheel
+	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+		delete $_[HEAP]->{'SOCKETFACTORY'};
+	}
+
+	# Debug stuff
+	if ( DEBUG ) {
+		warn 'Stopped listening for new connections!';
+	}
+
 	# Are we gracefully shutting down or not?
 	if ( defined $_[ARG0] and $_[ARG0] eq 'GRACEFUL' ) {
-		# Shutdown the SocketFactory wheel
-		if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
-			delete $_[HEAP]->{'SOCKETFACTORY'};
-		}
+		# Check if we should shutdown if no requests
+		if ( $_[HEAP]->{'AUTODIE'} ) {
+			# Check for number of requests
+			if ( keys( %{ $_[HEAP]->{'REQUESTS'} } ) == 0 ) {
+				# Alright, shutdown anyway
 
-		# Debug stuff
-		if ( DEBUG ) {
-			warn 'Stopped listening for new connections!';
+				# Delete our alias
+				$_[KERNEL]->alias_remove( $_[HEAP]->{'ALIAS'} );
+
+				# Debug stuff
+				if ( DEBUG ) {
+					warn 'Stopped SimpleHTTP gracefully, no requests left';
+				}
+			}
 		}
 
 		# All done!
@@ -252,20 +268,20 @@ sub StopServer {
 	}
 
 	# Forcibly close all sockets that are open
-	foreach my $conn ( values %{ $_[HEAP]->{'REQUESTS'} } ) {
+	foreach my $conn ( keys %{ $_[HEAP]->{'REQUESTS'} } ) {
 		# Can't call method "shutdown_input" on an undefined value at
 		# /usr/lib/perl5/site_perl/5.8.2/POE/Component/Server/SimpleHTTP.pm line 323.
-		if ( defined $conn->[0] and defined $conn->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
-			$conn->[0]->shutdown_input;
-			$conn->[0]->shutdown_output;
+		if ( defined $_[HEAP]->{'REQUESTS'}->{ $conn }->[0] and defined $_[HEAP]->{'REQUESTS'}->{ $conn }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+			$_[HEAP]->{'REQUESTS'}->{ $conn }->[0]->shutdown_input;
+			$_[HEAP]->{'REQUESTS'}->{ $conn }->[0]->shutdown_output;
 		}
+
+		# Delete this request
+		delete $_[HEAP]->{'REQUESTS'}->{ $conn };
 	}
 
 	# Delete our alias
 	$_[KERNEL]->alias_remove( $_[HEAP]->{'ALIAS'} );
-
-	# Remove all connections
-	delete $_[HEAP]->{'REQUESTS'};
 
 	# Debug stuff
 	if ( DEBUG ) {
@@ -338,7 +354,7 @@ sub StartListen {
 	}
 
 	# Call SetupListener and tell it to not increment the retry counter
-	$_[KERNEL]->call( 'SetupListener', 'NOINC' );
+	$_[KERNEL]->call( $_[SESSION], 'SetupListener', 'NOINC' );
 
 	# Tell the flush event to signal shutdown if no requests left
 	$_[HEAP]->{'AUTODIE'} = 1;
@@ -350,7 +366,7 @@ sub StartListen {
 # Stops listening on the socket
 sub StopListen {
 	# Simply call SHUTDOWN with an argument
-	$_[KERNEL]->yield( 'SHUTDOWN', 'GRACEFUL' );
+	$_[KERNEL]->call( 'SHUTDOWN', 'GRACEFUL' );
 
 	# Tell the flush event to NOT signal shutdown if no requests left
 	$_[HEAP]->{'AUTODIE'} = 0;
@@ -872,6 +888,11 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.09
+
+	Fixed a small bug regarding the timing of SHUTDOWN GRACEFUL
+	I always forget to supply the session parameter to $kernel->call() :X
 
 =head2 1.08
 
