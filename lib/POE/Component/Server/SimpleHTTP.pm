@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.06';
+our $VERSION = '1.07';
 
 # Import what we need from the POE namespace
 use POE;
@@ -166,6 +166,7 @@ sub new {
 
 			# Shutdown event
 			'SHUTDOWN'	=>	\&StopServer,
+			'STOPLISTEN'	=>	\&StopListen,
 
 			# Wheel::ReadWrite stuff
 			'Got_Connection'	=>	\&Got_Connection,
@@ -329,12 +330,38 @@ sub SetupWheel {
 			'FailureEvent'	=>	'Got_ServerError',
 		);
 	}
+
+	# Success!
+	return 1;
+}
+
+# Stops listening on the socket
+sub StopListen {
+	# Shutdown the SocketFactory wheel
+	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+		delete $_[HEAP]->{'SOCKETFACTORY'};
+	} else {
+		# Warn only if debugging
+		if ( DEBUG ) {
+			warn 'Received STOPLISTEN when already received it';
+		}
+	}
+
+	# Debug stuff
+	if ( DEBUG ) {
+		warn 'Successfully stopped listening for new connections';
+	}
+
+	# Return success
+	return 1;
 }
 
 # Stops the server!
 sub StopServer {
 	# Shutdown the SocketFactory wheel
-	delete $_[HEAP]->{'SOCKETFACTORY'};
+	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+		delete $_[HEAP]->{'SOCKETFACTORY'};
+	}
 
 	# Forcibly close all sockets that are open
 	foreach my $conn ( values %{ $_[HEAP]->{'WHEELS'} } ) {
@@ -384,6 +411,9 @@ sub Got_Connection {
 	if ( DEBUG ) {
 		warn "Got_Connection completed creation of ReadWrite wheel ( " . $wheel->ID . " )";
 	}
+
+	# Success!
+	return 1;
 }
 
 # Finally got input, set some stuff and send away!
@@ -476,7 +506,7 @@ sub Got_Input {
 			);
 
 			# All done!
-			return undef;
+			return;
 		}
 	}
 
@@ -510,6 +540,9 @@ sub Got_Flush {
 			warn "Got Flush event for socket ( $id ) when did not send anything!";
 		}
 	}
+
+	# Success!
+	return 1;
 }
 
 # Output to the client!
@@ -568,6 +601,9 @@ sub Got_Output {
 	if ( DEBUG ) {
 		warn "Completed with Wheel ID $wheel";
 	}
+
+	# Success!
+	return 1;
 }
 
 # Closes the connection
@@ -614,6 +650,9 @@ sub Got_Error {
 
 	# Delete this connection
 	delete $_[HEAP]->{'WHEELS'}->{ $wheel_id };
+
+	# Success!
+	return 1;
 }
 
 # Got some sort of error from SocketFactory
@@ -628,6 +667,9 @@ sub Got_ServerError {
 
 	# Setup the SocketFactory wheel
 	$_[KERNEL]->call( $_[SESSION], 'SetupWheel' );
+
+	# Success!
+	return 1;
 }
 
 # End of module
@@ -748,6 +790,12 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.07
+
+	Added the STOPLISTEN event, to make it shutdown the listening socket to help larger programs shutdown cleanly
+	Removed the CHANGES file, as it is redundant :)
+	Added "return 1;" everywhere I could to avoid the nasty copy-on-exit POE bug squashed in 1.05
 
 =head2 1.06
 
@@ -897,7 +945,7 @@ is a "catch-all" DIR regex like '.*', it will catch the errors, and only that on
 
 =head2 Events
 
-SimpleHTTP is so simple, there are only 5 events available.
+SimpleHTTP is so simple, there are only 6 events available.
 
 =over 4
 
@@ -938,6 +986,13 @@ SimpleHTTP is so simple, there are only 5 events available.
 =item C<SHUTDOWN>
 
 	Calling this event makes SimpleHTTP shut down by closing it's TCP socket.
+	Also, this will close all sockets that are still lingering ( sent to your handler, but not received ).
+	The alias will also be removed, making this instance vanish.
+
+=item C<STOPLISTEN>
+
+	Calling this event makes SimpleHTTP shutdown the listening socket, but is still awaiting the SHUTDOWN event to completely kill itself.
+	This will not close any lingering sockets, nor kill it's alias, so you still can post DONE/CLOSE/SHUTDOWN events to it.
 
 =back
 
@@ -1010,7 +1065,7 @@ Apocalypse E<lt>apocal@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2003 by Apocalypse
+Copyright 2004 by Apocalypse
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
