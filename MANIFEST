@@ -1,0 +1,9 @@
+lib/POE/Component/Server/SimpleHTTP.pm
+lib/POE/Component/Server/SimpleHTTP/Request.pm
+lib/POE/Component/Server/SimpleHTTP/Response.pm
+lib/POE/Component/Server/SimpleHTTP/Connection.pm
+Makefile.PL
+MANIFEST
+README
+t/1.t
+Changes
