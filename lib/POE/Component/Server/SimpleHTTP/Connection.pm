@@ -8,16 +8,34 @@ use warnings FATAL => 'all';				# Enable warnings to catch errors
 # Initialize our version
 our $VERSION = '1.03';
 
+# Get some things we need
+use Socket qw( inet_ntoa unpack_sockaddr_in );
+
 # Creates a new instance!
 sub new {
+	# Get rid of the class
+	my $class = shift;
+
 	# Create the hash
 	my $self = {};
 
-	# Set stuff
-	$self->{'remote_ip'} = shift;
-	$self->{'remote_port'} = shift;
-	$self->{'remote_addr'} = shift;
-	$self->{'local_addr'} = shift;
+	# Get the stuff
+	my $socket = shift;
+
+	# Figure out everything!
+	eval {
+		( $self->{'remote_port'}, $self->{'remote_addr'} ) = unpack_sockaddr_in( getpeername( $socket ) );
+		$self->{'remote_ip'} = inet_ntoa( $self->{'remote_addr'} );
+
+		( $self->{'local_port'}, $self->{'local_addr'} ) = unpack_sockaddr_in( getsockname( $socket ) );
+		$self->{'local_ip'} = inet_ntoa( $self->{'local_addr'} );
+	};
+
+	# Check for errors!
+	if ( $@ ) {
+		# Just ignore this socket and return nothing!
+		return undef;
+	}
 
 	# Bless ourself!
 	bless( $self, 'POE::Component::Server::SimpleHTTP::Connection' );
@@ -62,6 +80,24 @@ sub local_addr {
 	return $self->{'local_addr'};
 }
 
+# Gets the local_ip
+sub local_ip {
+	# Get ourself!
+	my $self = shift;
+
+	# Return the data
+	return $self->{'local_ip'};
+}
+
+# Gets the local_port
+sub local_port {
+	# Get ourself!
+	my $self = shift;
+
+	# Return the data
+	return $self->{'local_port'};
+}
+
 # End of module
 1;
 
@@ -73,15 +109,17 @@ POE::Component::Server::SimpleHTTP::Connection - Stores connection information f
 =head1 SYNOPSIS
 
 	use POE::Component::Server::SimpleHTTP::Connection;
-	my $connection = POE::Component::Server::SimpleHTTP::Connection->new();
+	my $connection = POE::Component::Server::SimpleHTTP::Connection->new( $socket );
 
-	# Set data manually
-	$connection->{'remote_port'} = 1024;
-
-	# Get data automatically
+	# Print some stuff
 	print $connection->remote_port;
 
 =head1 CHANGES
+
+=head2 1.03
+
+	Updated POD
+	Added local_ip + local_port accessors
 
 =head2 1.02
 
@@ -97,12 +135,14 @@ POE::Component::Server::SimpleHTTP::Connection - Stores connection information f
 
 =head2 METHODS
 
-	my $connection = POE::Component::Server::SimpleHTTP::Connection->new();
+	my $connection = POE::Component::Server::SimpleHTTP::Connection->new( $socket );
 
 	$connection->remote_ip();	# Returns remote ip in dotted quad format ( 1.1.1.1 )
 	$connection->remote_port();	# Returns remote port
 	$connection->remote_addr();	# Returns true remote address, consult the L<Socket> POD
 	$connection->local_addr();	# Returns true local address, same as above
+	$connection->local_ip();	# Returns local ip in dotted quad format ( 1.1.1.1 )
+	$connection->local_port();	# Returns local port
 
 =head2 EXPORT
 

@@ -6,36 +6,35 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.04';
+our $VERSION = '1.05';
 
 # Import what we need from the POE namespace
-use POE;			# For the constants
-use POE::Session;		# To create our own :)
+use POE;
+use POE::Wheel::SocketFactory;
+use POE::Wheel::ReadWrite;
+use POE::Driver::SysRW;
+use POE::Filter::HTTPD;
 
 # Other miscellaneous modules we need
-use Carp;
+use Carp qw( croak );
 
 # HTTP-related modules
-use HTTP::Date;
-use Socket qw( inet_ntoa );
+use HTTP::Date qw( time2str );
 
 # Our own HTTP modules
 use POE::Component::Server::SimpleHTTP::Connection;
-use POE::Component::Server::SimpleHTTP::Request;
 use POE::Component::Server::SimpleHTTP::Response;
-
-# POE modules to handle the connection
-use POE::Wheel::ReadWrite;
-use POE::Driver::SysRW;
-use POE::Filter::Stream;
-use POE::Filter::HTTPD;
-use POE::Component::Server::TCP;
 
 # Set some constants
 BEGIN {
 	# Debug fun!
 	if ( ! defined &DEBUG ) {
 		eval "sub DEBUG () { 0 }";
+	}
+
+	# Our own definition of the max retries
+	if ( ! defined &MAX_RETRIES ) {
+		eval "sub MAX_RETRIES () { 5 }";
 	}
 }
 
@@ -59,7 +58,7 @@ sub new {
 	# But, that kind of behavior is not defined, so I would not trust it...
 
 	# Get the session alias
-	if ( exists $opt{'ALIAS'} ) {
+	if ( exists $opt{'ALIAS'} and defined $opt{'ALIAS'} and length( $opt{'ALIAS'} ) ) {
 		$ALIAS = $opt{'ALIAS'};
 		delete $opt{'ALIAS'};
 	} else {
@@ -73,7 +72,7 @@ sub new {
 	}
 
 	# Get the PORT
-	if ( exists $opt{'PORT'} ) {
+	if ( exists $opt{'PORT'} and defined $opt{'PORT'} and length( $opt{'PORT'} ) ) {
 		$PORT = $opt{'PORT'};
 		delete $opt{'PORT'};
 	} else {
@@ -81,7 +80,7 @@ sub new {
 	}
 
 	# Get the ADDRESS
-	if ( exists $opt{'ADDRESS'} ) {
+	if ( exists $opt{'ADDRESS'} and defined $opt{'ADDRESS'} and length( $opt{'ADDRESS'} ) ) {
 		$ADDRESS = $opt{'ADDRESS'};
 		delete $opt{'ADDRESS'};
 	} else {
@@ -89,7 +88,7 @@ sub new {
 	}
 
 	# Get the HOSTNAME
-	if ( exists $opt{'HOSTNAME'} ) {
+	if ( exists $opt{'HOSTNAME'} and defined $opt{'HOSTNAME'} and length( $opt{'HOSTNAME'} ) ) {
 		$HOSTNAME = $opt{'HOSTNAME'};
 		delete $opt{'HOSTNAME'};
 	} else {
@@ -103,7 +102,7 @@ sub new {
 	}
 
 	# Get the HEADERS
-	if ( exists $opt{'HEADERS'} ) {
+	if ( exists $opt{'HEADERS'} and defined $opt{'HEADERS'} ) {
 		# Make sure it is ref to hash
 		if ( ref( $opt{'HEADERS'} ) and ref( $opt{'HEADERS'} ) eq 'HASH' ) {
 			$HEADERS = $opt{'HEADERS'};
@@ -117,7 +116,7 @@ sub new {
 	}
 
 	# Get the HANDLERS
-	if ( exists $opt{'HANDLERS'} ) {
+	if ( exists $opt{'HANDLERS'} and defined $opt{'HANDLERS'} ) {
 		# Make sure it is ref to array
 		if ( ref( $opt{'HANDLERS'} ) and ref( $opt{'HANDLERS'} ) eq 'ARRAY' ) {
 			$HANDLERS = $opt{'HANDLERS'};
@@ -129,6 +128,13 @@ sub new {
 		croak( 'HANDLERS is required to create a new POE::Component::Server::SimpleHTTP instance!' );
 	}
 
+	# Anything left over is unrecognized
+	if ( keys %opt > 0 ) {
+		if ( DEBUG ) {
+			croak( 'Unrecognized options were present in POE::Component::Server::SimpleHTTP->new -> ' . join( ', ', keys %opt ) );
+		}
+	}
+
 	# Create a new session for ourself
 	POE::Session->create(
 		# Our subroutines
@@ -137,6 +143,7 @@ sub new {
 			'_start'	=>	\&StartServer,
 			'_stop'		=>	sub {},
 			'_child'	=>	sub {},
+			'SetupWheel'	=>	\&SetupWheel,
 
 			# HANDLER stuff
 			'GETHANDLERS'	=>	\&GetHandlers,
@@ -150,6 +157,7 @@ sub new {
 			'Got_Input'		=>	\&Got_Input,
 			'Got_Flush'		=>	\&Got_Flush,
 			'Got_Error'		=>	\&Got_Error,
+			'Got_ServerError'	=>	\&Got_ServerError,
 
 			# Send output to connection!
 			'DONE'		=>	\&Got_Output,
@@ -163,6 +171,9 @@ sub new {
 			'HEADERS'	=>	$HEADERS,
 			'HOSTNAME'	=>	$HOSTNAME,
 			'HANDLERS'	=>	$HANDLERS,
+			'WHEELS'	=>	{},
+			'SOCKETFACTORY'	=>	undef,
+			'RETRIES'	=>	0,
 		},
 	) or die 'Unable to create a new session!';
 
@@ -206,31 +217,6 @@ sub SetHandlers {
 	$_[HEAP]->{'HANDLERS'} = $handlers;
 }
 
-# Starts the server!
-sub StartServer {
-	# Register an alias for ourself
-	$_[KERNEL]->alias_set( $_[HEAP]->{'ALIAS'} );
-
-	# Massage the handlers!
-	MassageHandlers( $_[HEAP]->{'HANDLERS'} );
-
-	# Set up the HTTPD Daemon!
-	POE::Component::Server::TCP->new(
-		# Stuff to set up the port
-		'Address'	=>	$_[HEAP]->{'ADDRESS'},
-		'Port'		=>	$_[HEAP]->{'PORT'},
-
-		# Set the alias so we can destroy it later
-		'Alias'		=>	$_[HEAP]->{'ALIAS'} . '_TCP',
-
-		# Receive connections and handle them ourself!
-		'Acceptor'	=>	\&Acceptor,
-	);
-
-	# All done!
-	return 1;
-}
-
 # This subroutine massages the HANDLERS for internal use
 sub MassageHandlers {
 	# Get the ref to handlers
@@ -258,7 +244,7 @@ sub MassageHandlers {
 			}
 
 			# Convert SESSION to ID
-			if ( UNIVERSAL::isa( $handler->[ $count ]->{'SESSION'}, 'POE::Session') ) {
+			if ( UNIVERSAL::isa( $handler->[ $count ]->{'SESSION'}, 'POE::Session' ) ) {
 				$handler->[ $count ]->{'SESSION'} = $handler->[ $count ]->{'SESSION'}->ID;
 			}
 
@@ -282,13 +268,58 @@ sub MassageHandlers {
 	}
 }
 
+# Starts the server!
+sub StartServer {
+	# Debug stuff
+	if ( DEBUG ) {
+		warn 'Starting up SimpleHTTP now';
+	}
+
+	# Register an alias for ourself
+	$_[KERNEL]->alias_set( $_[HEAP]->{'ALIAS'} );
+
+	# Massage the handlers!
+	MassageHandlers( $_[HEAP]->{'HANDLERS'} );
+
+	# Setup the wheel
+	$_[KERNEL]->yield( 'SetupWheel' );
+
+	# All done!
+	return 1;
+}
+
+# Sets up the wheel :)
+sub SetupWheel {
+	# Debug stuff
+	if ( DEBUG ) {
+		warn 'Creating SocketFactory wheel now';
+	}
+
+	# Check if we should set up the wheel
+	if ( $_[HEAP]->{'RETRIES'} == MAX_RETRIES ) {
+		die 'POE::Component::Server::SimpleHTTP tried ' . MAX_RETRIES . ' times to create a Wheel and is giving up...';
+	} else {
+		# Increment the retries count
+		$_[HEAP]->{'RETRIES'}++;
+
+		# Create our own SocketFactory :)
+		$_[HEAP]->{'SOCKETFACTORY'} = POE::Wheel::SocketFactory->new(
+			'BindPort'	=>	$_[HEAP]->{'PORT'},
+			'BindAddress'	=>	$_[HEAP]->{'ADDRESS'},
+			'Reuse'		=>	'yes',
+			'SuccessEvent'	=>	'Got_Connection',
+			'FailureEvent'	=>	'Got_ServerError',
+		);
+	}
+}
+
 # Stops the server!
 sub StopServer {
-	# Tell our TCP counterpart to die!
-	$_[KERNEL]->call( $_[HEAP]->{'ALIAS'} . '_TCP', 'shutdown' );
+	# Shutdown the SocketFactory wheel
+	delete $_[HEAP]->{'SOCKETFACTORY'};
 
 	# Forcibly close all sockets that are open
-	foreach my $conn ( @{ $_[HEAP]->{'WHEELS'} } ) {
+	foreach my $conn ( values %{ $_[HEAP]->{'WHEELS'} } ) {
 		$conn->[0]->shutdown_input;
 		$conn->[0]->shutdown_output;
 	}
@@ -299,40 +330,19 @@ sub StopServer {
 	# Remove all connections
 	delete $_[HEAP]->{'WHEELS'};
 
-	# Return success
-	return 1;
-}
-
-# Accepts new connections
-sub Acceptor {
-	# ARG0 = Socket, ARG1 = Remote Address, ARG2 = Remote Port
-
-	# Send to the main server session
-	if ( $_[HEAP]->{'alias'} =~ /^(.*)\_TCP$/ ) {
-		my $parent = $1;
-		$_[KERNEL]->post( $1, 'Got_Connection', $_[ ARG0 ], $_[ ARG1 ], $_[ ARG2 ] );
-	} else {
-		die 'Unable to get the parent alias!';
-	}
-
 	# Debug stuff
 	if ( DEBUG ) {
-		warn 'Acceptor got connection, sending to parent';
+		warn 'Successfully stopped SimpleHTTP';
 	}
+
+	# Return success
+	return 1;
 }
 
 # The actual manager of connections
 sub Got_Connection {
 	# ARG0 = Socket, ARG1 = Remote Address, ARG2 = Remote Port
-	my( $socket, $remote_address, $remote_port ) = @_[ ARG0 .. ARG2 ];
-
-	# Create the connection object
-	my $connection = POE::Component::Server::SimpleHTTP::Connection->new(
-		inet_ntoa( $remote_address ),
-		$remote_port,
-		getpeername( $socket ),
-		getsockname( $socket )
-	);
+	my $socket = $_[ ARG0 ];
 
 	# Set up the Wheel to read from the socket
 	my $wheel = POE::Wheel::ReadWrite->new(
@@ -345,8 +355,8 @@ sub Got_Connection {
 	);
 
 	# Save this wheel!
-	# 0 = wheel, 1 = connection, 2 = Output done?
-	$_[HEAP]->{'WHEELS'}->{ $wheel->ID } = [ $wheel, $connection, 0 ];
+	# 0 = wheel, 1 = Output done?
+	$_[HEAP]->{'WHEELS'}->{ $wheel->ID } = [ $wheel, 0 ];
 
 	# Debug stuff
 	if ( DEBUG ) {
@@ -359,31 +369,77 @@ sub Got_Input {
 	# ARG0 = HTTP::Request object, ARG1 = Wheel ID
 	my( $request, $id ) = @_[ ARG0, ARG1 ];
 
-	# Change the HTTP::Request object to our stuff!
-	bless( $request, 'POE::Component::Server::SimpleHTTP::Request' );
+	# Quick check to see if the socket died already...
+	# Initially reported by Tim Wood
+	if ( ! defined $_[HEAP]->{'WHEELS'}->{ $id }->[0] or ! defined $_[HEAP]->{'WHEELS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+		if ( DEBUG ) {
+			warn 'Got a request, but socket died already!';
+		}
 
-	# Get the connection
-	my $c = $_[HEAP]->{'WHEELS'}->{ $id }->[1];
+		# Destroy this wheel!
+		delete $_[HEAP]->{'WHEELS'}->{ $id }->[0];
+		delete $_[HEAP]->{'WHEELS'}->{ $id };
 
-	# Add stuff it needs!
-	my $uri = $request->uri;
-	$uri->scheme( 'http' );
-	$uri->host( $_[HEAP]->{'HOSTNAME'} );
-	$uri->port( $_[HEAP]->{'PORT'} );
-	$request->_Connection( $c );
-
-	# Get the path
-	my $path = $uri->path();
-	if ( ! defined $path or $path eq '' ) {
-		# Make it the default handler
-		$path = '/';
+		# All done!
+		return;
 	}
 
-	# Get the response
-	my $response = POE::Component::Server::SimpleHTTP::Response->new( $id );
+	# The HTTP::Response object, the path
+	my ( $response, $path );
 
-	# Stuff the default headers
-	$response->header( %{ $_[HEAP]->{'HEADERS'} } );
+	# Check if it is HTTP::Request or Response
+	# Quoting POE::Filter::HTTPD
+	# The HTTPD filter parses the first HTTP 1.0 request from an incoming stream into an
+	# HTTP::Request object (if the request is good) or an HTTP::Response object (if the
+	# request was malformed).
+	if ( ref( $request ) eq 'HTTP::Response' ) {
+		# Make the request nothing
+		$response = $request;
+		$request = undef;
+
+		# Hack it to simulate POE::Component::Server::SimpleHTTP::Response->new( $id, $conn );
+		bless( $response, 'POE::Component::Server::SimpleHTTP::Response' );
+		$response->{'WHEEL_ID'} = $id;
+
+		# Directly access POE::Wheel::ReadWrite's HANDLE_INPUT -> to get the socket itself
+		$response->{'CONNECTION'} = POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'WHEELS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
+
+		# Set the path to an empty string
+		$path = '';
+	} else {
+		# Add stuff it needs!
+		my $uri = $request->uri;
+		$uri->scheme( 'http' );
+		$uri->host( $_[HEAP]->{'HOSTNAME'} );
+		$uri->port( $_[HEAP]->{'PORT'} );
+
+		# Get the path
+		$path = $uri->path();
+		if ( ! defined $path or $path eq '' ) {
+			# Make it the default handler
+			$path = '/';
+		}
+
+		# Get the response
+		# Directly access POE::Wheel::ReadWrite's HANDLE_INPUT -> to get the socket itself
+		$response = POE::Component::Server::SimpleHTTP::Response->new(
+			$id,
+			POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'WHEELS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] )
+		);
+
+		# Stuff the default headers
+		$response->header( %{ $_[HEAP]->{'HEADERS'} } );
+	}
+
+	# Check if the SimpleHTTP::Connection object croaked ( happens when sockets just disappear )
+	if ( ! defined $response->{'CONNECTION'} ) {
+		# Destroy this wheel!
+		delete $_[HEAP]->{'WHEELS'}->{ $id }->[0];
+		delete $_[HEAP]->{'WHEELS'}->{ $id };
+
+		# All done!
+		return;
+	}
 
 	# Find which handler will handle this one
 	foreach my $handler ( @{ $_[HEAP]->{'HANDLERS'} } ) {
@@ -417,8 +473,14 @@ sub Got_Flush {
 	}
 
 	# Check if we are shutting down
-	if ( $_[HEAP]->{'WHEELS'}->{ $id }->[2] ) {
+	if ( $_[HEAP]->{'WHEELS'}->{ $id }->[1] ) {
+		# Shutdown read/write on the wheel
+		$_[HEAP]->{'WHEELS'}->{ $id }->[0]->shutdown_input();
+		$_[HEAP]->{'WHEELS'}->{ $id }->[0]->shutdown_output();
+
 		# Delete the wheel
+		# Tracked down by Paul Visscher
+		delete $_[HEAP]->{'WHEELS'}->{ $id }->[0];
 		delete $_[HEAP]->{'WHEELS'}->{ $id };
 	} else {
 		# Ignore this, eh?
@@ -430,7 +492,7 @@ sub Got_Flush {
 
 # Output to the client!
 sub Got_Output {
-	# ARG0 = HTTP::Response object or ref to string
+	# ARG0 = HTTP::Response object
 	my $response = $_[ ARG0 ];
 
 	# Check if we got it
@@ -445,9 +507,18 @@ sub Got_Output {
 
 	# Check if we have already sent the response
 	my $wheel = $response->_WHEEL;
-	if ( $_[HEAP]->{'WHEELS'}->{ $wheel }->[2] ) {
+	if ( $_[HEAP]->{'WHEELS'}->{ $wheel }->[1] ) {
 		# Tried to send twice!
 		die 'Tried to send a response to the same connection twice!';
+	}
+
+	# Quick check to see if the wheel/socket died already...
+	# Initially reported by Tim Wood
+	if ( ! defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0] or ! defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+		if ( DEBUG ) {
+			warn 'Tried to send data over a closed/nonexistant socket!';
+		}
+		return;
 	}
 
 	# Set the date if needed
@@ -466,16 +537,10 @@ sub Got_Output {
 	}
 
 	# Send it out!
-	# Bug reported by Tim Wood
-	eval { $_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->put( $response ) };
-	if ( $@ ) {
-		if ( DEBUG ) {
-			warn 'Tried to send data over a closed/nonexistant socket!';
-		}
-	}
+	$_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->put( $response );
 
 	# Mark this socket done
-	$_[HEAP]->{'WHEELS'}->{ $wheel }->[2] = 1;
+	$_[HEAP]->{'WHEELS'}->{ $wheel }->[1] = 1;
 
 	# Debug stuff
 	if ( DEBUG ) {
@@ -495,6 +560,20 @@ sub Got_Error {
 
 	# Delete this connection
 	delete $_[HEAP]->{'WHEELS'}->{ $wheel_id };
+}
+
+# Got some sort of error from SocketFactory
+sub Got_ServerError {
+	# ARG0 = operation, ARG1 = error number, ARG2 = error string, ARG3 = wheel ID
+	my ( $operation, $errnum, $errstr, $wheel_id ) = @_[ ARG0 .. ARG3 ];
+
+	# Debug stuff
+	if ( DEBUG ) {
+		warn "SocketFactory Wheel $wheel_id generated $operation error $errnum: $errstr\n";
+	}
+
+	# Setup the SocketFactory wheel
+	$_[KERNEL]->call( $_[SESSION], 'SetupWheel' );
 }
 
 # End of module
@@ -573,6 +652,7 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 		$response->content( 'Some funky HTML here' );
 
 		# We are done!
+		# For speed, you could use $_[KERNEL]->call( ... )
 		$_[KERNEL]->post( 'HTTPD', 'DONE', $response );
 	}
 
@@ -580,11 +660,18 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 		# ARG0 = HTTP::Request object, ARG1 = HTTP::Response object, ARG2 = the DIR that matched
 		my( $request, $response, $dirmatch ) = @_[ ARG0 .. ARG2 ];
 
+		# Check for errors
+		if ( ! defined $request ) {
+			$_[KERNEL]->post( 'HTTPD', 'DONE', $response );
+			return;
+		}
+
 		# Do our stuff to HTTP::Response
 		$response->code( 404 );
-		$response->content( "Hi visitor from " . $request->connection->remote_ip . ", Page not found -> '" . $request->uri->path . "'" );
+		$response->content( "Hi visitor from " . $response->connection->remote_ip . ", Page not found -> '" . $request->uri->path . "'" );
 
 		# We are done!
+		# For speed, you could use $_[KERNEL]->call( ... )
 		$_[KERNEL]->post( 'HTTPD', 'DONE', $response );
 	}
 
@@ -593,6 +680,23 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.05
+
+	Got rid of POE::Component::Server::TCP and replaced it with POE::Wheel::SocketFactory for speed/efficiency
+	As the documentation for POE::Filter::HTTPD says, updated POD to reflect the HTTP::Request/Response issue
+	Got rid of SimpleHTTP::Request, due to moving of the Connection object to Response
+		->	Found a circular leak by having SimpleHTTP::Connection in SimpleHTTP::Request, to get rid of it, moved it to Response
+		->	Realized that sometimes HTTP::Request will be undef, so how would you get the Connection object?
+	Internal tweaking to save some memory
+	Added the MAX_RETRIES subroutine
+	More extensive DEBUG statements
+	POD updates
+	Paul Visscher tracked down the HTTP::Request object leak, thanks!
+	Cleaned up the Makefile.PL
+	Benchmarked and found a significant speed difference between post()ing and call()ing the DONE event
+		-> The call() method is ~8% faster
+		-> However, the chance of connecting sockets timing out is greater...
 
 =head2 1.04
 
@@ -698,7 +802,7 @@ SimpleHTTP will DIE!
 This allows some cool things like specifying 3 handlers with DIR of:
 '^/foo/.*', '^/$', '.*'
 
-Now, if the request is not in /foo or not root, your 3rd handler will catch it, becoming the "error" handler!
+Now, if the request is not in /foo or not root, your 3rd handler will catch it, becoming the "404 not found" handler!
 
 NOTE: You might get weird Session/Events, make sure your handlers are in order, for example: '^/', '^/foo/.*'
 The 2nd handler will NEVER get any requests, as the first one will match ( no $ in the regex )
@@ -707,13 +811,13 @@ Now, here's what a handler receives:
 
 ARG0 -> HTTP::Request object
 
-ARG1 -> HTTP::Response object
+ARG1 -> POE::Component::Server::SimpleHTTP::Response object
 
 ARG2 -> The exact DIR that matched, so you can see what triggered what
 
-Note: Technically, the HTTP objects are POE::Component::Server::SimpleHTTP::* objects...
-There's one added feature in the HTTP::Request object, the connection object.
-See the POD for L<POE::Component::Server::SimpleHTTP::Request> and L<POE::Component::Server::SimpleHTTP::Connection> modules.
+NOTE: If ARG0 is undef, that means POE::Filter::HTTPD encountered an error parsing the client request, simply modify the HTTP::Response
+object and send some sort of generic error. SimpleHTTP will set the path used in matching the DIR regexes to an empty string, so if there
+is a "catch-all" DIR regex like '.*', it will catch the errors, and only that one.
 
 =back
 
@@ -725,14 +829,17 @@ SimpleHTTP is so simple, there are only 4 events available.
 
 =item C<DONE>
 
-	This event accepts only one argument: the HTTP::Response object we sent off.
+	This event accepts only one argument: the HTTP::Response object we sent to the handler.
 
 	Calling this event implies that this particular request is done, and will proceed to close the socket.
 
 	NOTE: This method automatically sets those 3 headers if they are not already set:
-		Date		->	Current date stringified via HTTP::Date
+		Date		->	Current date stringified via HTTP::Date->time2str
 		Content-Type	->	text/html
 		Content-Length	->	length( $response->content )
+
+	To get greater throughput and response time, do not post() to the DONE event, call() it!
+	However, this will force your program to block while servicing web requests...
 
 =item C<GETHANDLERS>
 
@@ -762,8 +869,16 @@ All of the options are uppercase, to avoid confusion.
 
 You can enable debugging mode by doing this:
 
-	sub POE::Component::SimpleHTTP::DEBUG () { 1 }
-	use POE::Component::SimpleHTTP;
+	sub POE::Component::Server::SimpleHTTP::DEBUG () { 1 }
+	use POE::Component::Server::SimpleHTTP;
+
+Also, this module will try to keep the SocketFactory wheel alive.
+if it dies, it will open it again for a max of 5 retries.
+
+You can override this behavior by doing this:
+
+	sub POE::Component::Server::SimpleHTTP::MAX_RETRIES () { 10 }
+	use POE::Component::Server::SimpleHTTP;
 
 For those who are pondering about basic-authentication, here's a tiny snippet to put in the Event handler
 
@@ -806,8 +921,6 @@ L<HTTP::Request>
 L<HTTP::Response>
 
 L<POE::Component::Server::SimpleHTTP::Connection>
-
-L<POE::Component::Server::SimpleHTTP::Request>
 
 L<POE::Component::Server::SimpleHTTP::Response>
 

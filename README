@@ -1,4 +1,4 @@
-POE/Component/Server/SimpleHTTP version 1.04
+POE/Component/Server/SimpleHTTP version 1.05
 ============================================
 
 INSTALLATION
@@ -15,12 +15,10 @@ DEPENDENCIES
 This module requires these other modules and libraries:
 
 	POE > 0.27
-		POE::Session
 		POE::Wheel::ReadWrite
 		POE::Driver::SysRW
-		POE::Filter::Stream
 		POE::Filter::HTTPD
-		POE::Component::Server::TCP
+		POE::Wheel::SocketFactory
 
 	Carp
 
@@ -33,6 +31,8 @@ This module requires these other modules and libraries:
 	Sys::Hostname
 
 	Storable
+
+	Socket
 
 COPYRIGHT AND LICENSE
 

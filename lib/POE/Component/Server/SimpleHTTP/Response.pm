@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 
 # Set our stuff to HTTP::Response
 use base qw( HTTP::Response );
@@ -19,6 +19,9 @@ sub new {
 	# Get the Wheel ID
 	my $wid = shift;
 
+	# Get the Connection object
+	my $conn = shift;
+
 	# Make sure we got the wheel ID!
 	if ( ! defined $wid ) {
 		die 'Did not get a Wheel ID!';
@@ -30,6 +33,9 @@ sub new {
 	# Add the Wheel ID
 	$self->{'WHEEL_ID'} = $wid;
 
+	# Add the connection object
+	$self->{'CONNECTION'} = $conn;
+
 	# Bless it to ourself!
 	bless( $self, 'POE::Component::Server::SimpleHTTP::Response' );
 
@@ -37,13 +43,22 @@ sub new {
 	return $self;
 }
 
-# Sets the Wheel ID
+# Gets the Wheel ID
 sub _WHEEL {
 	# Get ourself
 	my $self = shift;
 
 	# Return the ID
 	return $self->{'WHEEL_ID'};
+}
+
+# Gets the connection object
+sub connection {
+	# Get ourself
+	my $self = shift;
+
+	# Return the conn object
+	return $self->{'CONNECTION'};
 }
 
 # End of module
@@ -57,9 +72,16 @@ POE::Component::Server::SimpleHTTP::Response - Emulates a HTTP::Response object,
 =head1 SYNOPSIS
 
 	use POE::Component::Server::SimpleHTTP::Response;
-	my $response = POE::Component::Server::SimpleHTTP::Response->new( $wheel_id );
+	my $response = POE::Component::Server::SimpleHTTP::Response->new( $wheel_id, $connection );
+
+	print $response->connection->remote_ip;
 
 =head1 CHANGES
+
+=head2 1.02
+
+	POD Formatting
+	Moved the SimpleHTTP::Connection object here from SimpleHTTP::Request
 
 =head2 1.01
 
@@ -67,7 +89,9 @@ POE::Component::Server::SimpleHTTP::Response - Emulates a HTTP::Response object,
 
 =head1 DESCRIPTION
 
-	This module is used as a drop-in replacement, because we need to store the wheel ID for the response.
+	This module is used as a drop-in replacement, because we need to store the wheel ID + connection object for the response.
+
+	Use $response->connection to get the SimpleHTTP::Connection object
 
 =head2 EXPORT
 
