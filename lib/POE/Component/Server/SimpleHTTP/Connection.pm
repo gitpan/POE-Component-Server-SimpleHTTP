@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 # Get some things we need
 use Socket qw( inet_ntoa unpack_sockaddr_in );
@@ -17,7 +17,10 @@ sub new {
 	my $class = shift;
 
 	# Create the hash
-	my $self = {};
+	my $self = {
+		# Did the socket die?
+		'DIED'	=>	0,
+	};
 
 	# Get the stuff
 	my $socket = shift;
@@ -98,6 +101,15 @@ sub local_port {
 	return $self->{'local_port'};
 }
 
+# Boolean accessor to check if the socket is dead
+sub dead {
+	# Get ourself!
+	my $self = shift;
+
+	# Return the data
+	return $self->{'DIED'};
+}
+
 # End of module
 1;
 
@@ -115,6 +127,10 @@ POE::Component::Server::SimpleHTTP::Connection - Stores connection information f
 	print $connection->remote_port;
 
 =head1 CHANGES
+
+=head2 1.04
+
+	Added the dead accessor
 
 =head2 1.03
 
@@ -143,6 +159,7 @@ POE::Component::Server::SimpleHTTP::Connection - Stores connection information f
 	$connection->local_addr();	# Returns true local address, same as above
 	$connection->local_ip();	# Returns local ip in dotted quad format ( 1.1.1.1 )
 	$connection->local_port();	# Returns local port
+	$connection->dead();		# Returns a boolean value whether the socket is closed or not
 
 =head2 EXPORT
 
@@ -152,13 +169,15 @@ Nothing.
 
 	L<POE::Component::Server::SimpleHTTP>
 
+	L<POE::Component::Server::SimpleHTTP::Response>
+
 =head1 AUTHOR
 
 Apocalypse E<lt>apocal@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2003 by Apocalypse
+Copyright 2004 by Apocalypse
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

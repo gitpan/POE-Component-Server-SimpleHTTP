@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.07';
+our $VERSION = '1.08';
 
 # Import what we need from the POE namespace
 use POE;
@@ -156,30 +156,31 @@ sub new {
 		'inline_states'	=>	{
 			# Maintenance events
 			'_start'	=>	\&StartServer,
-			'_stop'		=>	sub {},
+			'_stop'		=>	\&FindRequestLeaks,
 			'_child'	=>	sub {},
-			'SetupWheel'	=>	\&SetupWheel,
 
 			# HANDLER stuff
 			'GETHANDLERS'	=>	\&GetHandlers,
 			'SETHANDLERS'	=>	\&SetHandlers,
 
-			# Shutdown event
+			# SocketFactory events
 			'SHUTDOWN'	=>	\&StopServer,
 			'STOPLISTEN'	=>	\&StopListen,
+			'STARTLISTEN'	=>	\&StartListen,
+			'SetupListener'	=>	\&SetupListener,
+			'ListenerError'	=>	\&ListenerError,
 
 			# Wheel::ReadWrite stuff
 			'Got_Connection'	=>	\&Got_Connection,
 			'Got_Input'		=>	\&Got_Input,
 			'Got_Flush'		=>	\&Got_Flush,
 			'Got_Error'		=>	\&Got_Error,
-			'Got_ServerError'	=>	\&Got_ServerError,
 
 			# Send output to connection!
-			'DONE'		=>	\&Got_Output,
+			'DONE'		=>	\&Request_Output,
 
 			# Kill the connection!
-			'CLOSE'		=>	\&CloseConnection,
+			'CLOSE'		=>	\&Request_Close,
 		},
 
 		# Set up the heap for ourself
@@ -190,14 +191,184 @@ sub new {
 			'HEADERS'	=>	$HEADERS,
 			'HOSTNAME'	=>	$HOSTNAME,
 			'HANDLERS'	=>	$HANDLERS,
-			'WHEELS'	=>	{},
-			'SOCKETFACTORY'	=>	undef,
+			'REQUESTS'	=>	{},
 			'RETRIES'	=>	0,
+			'AUTODIE'	=>	1,
 		},
 	) or die 'Unable to create a new session!';
 
 	# Return success
 	return 1;
+}
+
+# This subroutine, when SimpleHTTP exits, will search for leaks
+sub FindRequestLeaks {
+	# Loop through all of the requests
+	foreach my $req ( keys %{ $_[HEAP]->{'REQUESTS'} } ) {
+		# Bite the programmer!
+		warn 'Did not get DONE/CLOSE event for Wheel ID ' . $req->[0]->ID . ' from IP ' . $req->[2]->connection->remote_ip;
+	}
+
+	# All done!
+	return 1;
+}
+
+# Starts the server!
+sub StartServer {
+	# Debug stuff
+	if ( DEBUG ) {
+		warn 'Starting up SimpleHTTP now';
+	}
+
+	# Register an alias for ourself
+	$_[KERNEL]->alias_set( $_[HEAP]->{'ALIAS'} );
+
+	# Massage the handlers!
+	MassageHandlers( $_[HEAP]->{'HANDLERS'} );
+
+	# Setup the wheel
+	$_[KERNEL]->yield( 'SetupListener' );
+
+	# All done!
+	return 1;
+}
+
+# Stops the server!
+sub StopServer {
+	# Are we gracefully shutting down or not?
+	if ( defined $_[ARG0] and $_[ARG0] eq 'GRACEFUL' ) {
+		# Shutdown the SocketFactory wheel
+		if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+			delete $_[HEAP]->{'SOCKETFACTORY'};
+		}
+
+		# Debug stuff
+		if ( DEBUG ) {
+			warn 'Stopped listening for new connections!';
+		}
+
+		# All done!
+		return 1;
+	}
+
+	# Forcibly close all sockets that are open
+	foreach my $conn ( values %{ $_[HEAP]->{'REQUESTS'} } ) {
+		# Can't call method "shutdown_input" on an undefined value at
+		# /usr/lib/perl5/site_perl/5.8.2/POE/Component/Server/SimpleHTTP.pm line 323.
+		if ( defined $conn->[0] and defined $conn->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+			$conn->[0]->shutdown_input;
+			$conn->[0]->shutdown_output;
+		}
+	}
+
+	# Delete our alias
+	$_[KERNEL]->alias_remove( $_[HEAP]->{'ALIAS'} );
+
+	# Remove all connections
+	delete $_[HEAP]->{'REQUESTS'};
+
+	# Debug stuff
+	if ( DEBUG ) {
+		warn 'Successfully stopped SimpleHTTP';
+	}
+
+	# Return success
+	return 1;
+}
+
+# Sets up the SocketFactory wheel :)
+sub SetupListener {
+	# Debug stuff
+	if ( DEBUG ) {
+		warn 'Creating SocketFactory wheel now';
+	}
+
+	# Check if we should set up the wheel
+	if ( $_[HEAP]->{'RETRIES'} == MAX_RETRIES ) {
+		die 'POE::Component::Server::SimpleHTTP tried ' . MAX_RETRIES . ' times to create a Wheel and is giving up...';
+	} else {
+		# Increment the retry count if we did not get 'NOINC' as an argument
+		if ( ! defined $_[ARG0] ) {
+			# Increment the retries count
+			$_[HEAP]->{'RETRIES'}++;
+		}
+
+		# Create our own SocketFactory Wheel :)
+		$_[HEAP]->{'SOCKETFACTORY'} = POE::Wheel::SocketFactory->new(
+			'BindPort'	=>	$_[HEAP]->{'PORT'},
+			'BindAddress'	=>	$_[HEAP]->{'ADDRESS'},
+			'Reuse'		=>	'yes',
+			'SuccessEvent'	=>	'Got_Connection',
+			'FailureEvent'	=>	'ListenerError',
+		);
+	}
+
+	# Success!
+	return 1;
+}
+
+# Got some sort of error from SocketFactory
+sub ListenerError {
+	# ARG0 = operation, ARG1 = error number, ARG2 = error string, ARG3 = wheel ID
+	my ( $operation, $errnum, $errstr, $wheel_id ) = @_[ ARG0 .. ARG3 ];
+
+	# Debug stuff
+	if ( DEBUG ) {
+		warn "SocketFactory Wheel $wheel_id generated $operation error $errnum: $errstr\n";
+	}
+
+	# Setup the SocketFactory wheel
+	$_[KERNEL]->call( $_[SESSION], 'SetupListener' );
+
+	# Success!
+	return 1;
+}
+
+# Starts listening on the socket
+sub StartListen {
+	# Check if we already have an socketfactory wheel
+	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+		# Debug stuff
+		if ( DEBUG ) {
+			warn 'STARTLISTEN was called, but we were listening!';
+		}
+
+		# All done!
+		return 1;
+	}
+
+	# Call SetupListener and tell it to not increment the retry counter
+	$_[KERNEL]->call( 'SetupListener', 'NOINC' );
+
+	# Tell the flush event to signal shutdown if no requests left
+	$_[HEAP]->{'AUTODIE'} = 1;
+
+	# All done!
+	return 1;
+}
+
+# Stops listening on the socket
+sub StopListen {
+	# Simply call SHUTDOWN with an argument
+	$_[KERNEL]->yield( 'SHUTDOWN', 'GRACEFUL' );
+
+	# Tell the flush event to NOT signal shutdown if no requests left
+	$_[HEAP]->{'AUTODIE'} = 0;
+
+	# All done!
+	return 1;
+}
+
+# Sets the HANDLERS
+sub SetHandlers {
+	# ARG0 = ref to handlers array
+	my $handlers = $_[ARG0];
+
+	# Validate it...
+	MassageHandlers( $handlers );
+
+	# If we got here, passed tests!
+	$_[HEAP]->{'HANDLERS'} = $handlers;
 }
 
 # Gets the HANDLERS
@@ -221,19 +392,7 @@ sub GetHandlers {
 	}
 
 	# All done!
-	$_[KERNEL]->post( $_[ARG0], $_[ARG1], $handlers );
-}
-
-# Sets the HANDLERS
-sub SetHandlers {
-	# ARG0 = ref to handlers array
-	my $handlers = $_[ARG0];
-
-	# Validate it...
-	MassageHandlers( $handlers );
-
-	# If we got here, passed tests!
-	$_[HEAP]->{'HANDLERS'} = $handlers;
+	$_[KERNEL]->post( $session, $event, $handlers );
 }
 
 # This subroutine massages the HANDLERS for internal use
@@ -287,107 +446,6 @@ sub MassageHandlers {
 	}
 }
 
-# Starts the server!
-sub StartServer {
-	# Debug stuff
-	if ( DEBUG ) {
-		warn 'Starting up SimpleHTTP now';
-	}
-
-	# Register an alias for ourself
-	$_[KERNEL]->alias_set( $_[HEAP]->{'ALIAS'} );
-
-	# Massage the handlers!
-	MassageHandlers( $_[HEAP]->{'HANDLERS'} );
-
-	# Setup the wheel
-	$_[KERNEL]->yield( 'SetupWheel' );
-
-	# All done!
-	return 1;
-}
-
-# Sets up the wheel :)
-sub SetupWheel {
-	# Debug stuff
-	if ( DEBUG ) {
-		warn 'Creating SocketFactory wheel now';
-	}
-
-	# Check if we should set up the wheel
-	if ( $_[HEAP]->{'RETRIES'} == MAX_RETRIES ) {
-		die 'POE::Component::Server::SimpleHTTP tried ' . MAX_RETRIES . ' times to create a Wheel and is giving up...';
-	} else {
-		# Increment the retries count
-		$_[HEAP]->{'RETRIES'}++;
-
-		# Create our own SocketFactory :)
-		$_[HEAP]->{'SOCKETFACTORY'} = POE::Wheel::SocketFactory->new(
-			'BindPort'	=>	$_[HEAP]->{'PORT'},
-			'BindAddress'	=>	$_[HEAP]->{'ADDRESS'},
-			'Reuse'		=>	'yes',
-			'SuccessEvent'	=>	'Got_Connection',
-			'FailureEvent'	=>	'Got_ServerError',
-		);
-	}
-
-	# Success!
-	return 1;
-}
-
-# Stops listening on the socket
-sub StopListen {
-	# Shutdown the SocketFactory wheel
-	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
-		delete $_[HEAP]->{'SOCKETFACTORY'};
-	} else {
-		# Warn only if debugging
-		if ( DEBUG ) {
-			warn 'Received STOPLISTEN when already received it';
-		}
-	}
-
-	# Debug stuff
-	if ( DEBUG ) {
-		warn 'Successfully stopped listening for new connections';
-	}
-
-	# Return success
-	return 1;
-}
-
-# Stops the server!
-sub StopServer {
-	# Shutdown the SocketFactory wheel
-	if ( exists $_[HEAP]->{'SOCKETFACTORY'} ) {
-		delete $_[HEAP]->{'SOCKETFACTORY'};
-	}
-
-	# Forcibly close all sockets that are open
-	foreach my $conn ( values %{ $_[HEAP]->{'WHEELS'} } ) {
-		# Can't call method "shutdown_input" on an undefined value at
-		# /usr/lib/perl5/site_perl/5.8.2/POE/Component/Server/SimpleHTTP.pm line 323.
-		if ( defined $conn->[0] and defined $conn->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
-			$conn->[0]->shutdown_input;
-			$conn->[0]->shutdown_output;
-		}
-	}
-
-	# Delete our alias
-	$_[KERNEL]->alias_remove( $_[HEAP]->{'ALIAS'} );
-
-	# Remove all connections
-	delete $_[HEAP]->{'WHEELS'};
-
-	# Debug stuff
-	if ( DEBUG ) {
-		warn 'Successfully stopped SimpleHTTP';
-	}
-
-	# Return success
-	return 1;
-}
-
 # The actual manager of connections
 sub Got_Connection {
 	# ARG0 = Socket, ARG1 = Remote Address, ARG2 = Remote Port
@@ -395,7 +453,7 @@ sub Got_Connection {
 
 	# Set up the Wheel to read from the socket
 	my $wheel = POE::Wheel::ReadWrite->new(
-	'Handle'	=>	$socket,
+		'Handle'	=>	$socket,
 		'Driver'	=>	POE::Driver::SysRW->new(),
 		'Filter'	=>	POE::Filter::HTTPD->new(),
 		'InputEvent'	=>	'Got_Input',
@@ -404,8 +462,8 @@ sub Got_Connection {
 	);
 
 	# Save this wheel!
-	# 0 = wheel, 1 = Output done?
-	$_[HEAP]->{'WHEELS'}->{ $wheel->ID } = [ $wheel, 0 ];
+	# 0 = wheel, 1 = Output done?, 2 = SimpleHTTP::Response object
+	$_[HEAP]->{'REQUESTS'}->{ $wheel->ID } = [ $wheel, 0, undef ];
 
 	# Debug stuff
 	if ( DEBUG ) {
@@ -423,14 +481,14 @@ sub Got_Input {
 
 	# Quick check to see if the socket died already...
 	# Initially reported by Tim Wood
-	if ( ! defined $_[HEAP]->{'WHEELS'}->{ $id }->[0] or ! defined $_[HEAP]->{'WHEELS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+	if ( ! defined $_[HEAP]->{'REQUESTS'}->{ $id }->[0] or ! defined $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
 		if ( DEBUG ) {
 			warn 'Got a request, but socket died already!';
 		}
 
 		# Destroy this wheel!
-		delete $_[HEAP]->{'WHEELS'}->{ $id }->[0];
-		delete $_[HEAP]->{'WHEELS'}->{ $id };
+		delete $_[HEAP]->{'REQUESTS'}->{ $id }->[0];
+		delete $_[HEAP]->{'REQUESTS'}->{ $id };
 
 		# All done!
 		return;
@@ -454,7 +512,7 @@ sub Got_Input {
 		$response->{'WHEEL_ID'} = $id;
 
 		# Directly access POE::Wheel::ReadWrite's HANDLE_INPUT -> to get the socket itself
-		$response->{'CONNECTION'} = POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'WHEELS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
+		$response->{'CONNECTION'} = POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
 
 		# Set the path to an empty string
 		$path = '';
@@ -476,7 +534,7 @@ sub Got_Input {
 		# Directly access POE::Wheel::ReadWrite's HANDLE_INPUT -> to get the socket itself
 		$response = POE::Component::Server::SimpleHTTP::Response->new(
 			$id,
-			POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'WHEELS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] )
+			POE::Component::Server::SimpleHTTP::Connection->new( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] )
 		);
 
 		# Stuff the default headers
@@ -486,12 +544,15 @@ sub Got_Input {
 	# Check if the SimpleHTTP::Connection object croaked ( happens when sockets just disappear )
 	if ( ! defined $response->{'CONNECTION'} ) {
 		# Destroy this wheel!
-		delete $_[HEAP]->{'WHEELS'}->{ $id }->[0];
-		delete $_[HEAP]->{'WHEELS'}->{ $id };
+		delete $_[HEAP]->{'REQUESTS'}->{ $id }->[0];
+		delete $_[HEAP]->{'REQUESTS'}->{ $id };
 
 		# All done!
 		return;
 	}
+
+	# Add this response to the wheel
+	$_[HEAP]->{'REQUESTS'}->{ $id }->[2] = $response;
 
 	# Find which handler will handle this one
 	foreach my $handler ( @{ $_[HEAP]->{'HANDLERS'} } ) {
@@ -514,7 +575,7 @@ sub Got_Input {
 	die 'No handler was able to handle ' . $path;
 }
 
-# Finished with a wheel!
+# Finished with a request!
 sub Got_Flush {
 	# ARG0 = wheel ID
 	my $id = $_[ ARG0 ];
@@ -525,19 +586,30 @@ sub Got_Flush {
 	}
 
 	# Check if we are shutting down
-	if ( $_[HEAP]->{'WHEELS'}->{ $id }->[1] ) {
+	if ( $_[HEAP]->{'REQUESTS'}->{ $id }->[1] ) {
 		# Shutdown read/write on the wheel
-		$_[HEAP]->{'WHEELS'}->{ $id }->[0]->shutdown_input();
-		$_[HEAP]->{'WHEELS'}->{ $id }->[0]->shutdown_output();
+		$_[HEAP]->{'REQUESTS'}->{ $id }->[0]->shutdown_input();
+		$_[HEAP]->{'REQUESTS'}->{ $id }->[0]->shutdown_output();
 
 		# Delete the wheel
 		# Tracked down by Paul Visscher
-		delete $_[HEAP]->{'WHEELS'}->{ $id }->[0];
-		delete $_[HEAP]->{'WHEELS'}->{ $id };
+		delete $_[HEAP]->{'REQUESTS'}->{ $id }->[0];
+		delete $_[HEAP]->{'REQUESTS'}->{ $id };
 	} else {
 		# Ignore this, eh?
 		if ( DEBUG ) {
-			warn "Got Flush event for socket ( $id ) when did not send anything!";
+			warn "Got Flush event for socket ( $id ) when we did not send anything!";
+		}
+	}
+
+	# Alright, do we have to shutdown?
+	if ( $_[HEAP]->{'AUTODIE'} ) {
+		if ( ! exists $_[HEAP]->{'SOCKETFACTORY'} ) {
+			# Check to see if we have any more requests
+			if ( keys( %{ $_[HEAP]->{'REQUESTS'} } ) == 0 ) {
+				# Shutdown!
+				$_[KERNEL]->yield( 'SHUTDOWN' );
+			}
 		}
 	}
 
@@ -545,8 +617,28 @@ sub Got_Flush {
 	return 1;
 }
 
+# Got some sort of error from ReadWrite
+sub Got_Error {
+	# ARG0 = operation, ARG1 = error number, ARG2 = error string, ARG3 = wheel ID
+	my ( $operation, $errnum, $errstr, $id ) = @_[ ARG0 .. ARG3 ];
+
+	# Debug stuff
+	if ( DEBUG ) {
+		warn "Wheel $id generated $operation error $errnum: $errstr\n";
+	}
+
+	# Make the client dead
+	$_[HEAP]->{'REQUESTS'}->{ $id }->[2]->{'CONNECTION'}->{'DIED'} = 1;
+
+	# Delete this connection
+	delete $_[HEAP]->{'REQUESTS'}->{ $id };
+
+	# Success!
+	return 1;
+}
+
 # Output to the client!
-sub Got_Output {
+sub Request_Output {
 	# ARG0 = HTTP::Response object
 	my $response = $_[ ARG0 ];
 
@@ -560,16 +652,29 @@ sub Got_Output {
 		return undef;
 	}
 
+	# Get the wheel ID
+	my $id = $response->_WHEEL;
+
+	# Check if the wheel exists ( sometimes it gets closed by the client, but the application doesn't know that... )
+	if ( ! exists $_[HEAP]->{'REQUESTS'}->{ $id } ) {
+		# Debug stuff
+		if ( DEBUG ) {
+			warn 'Wheel disappeared, but the application sent us a DONE event, discarding it';
+		}
+
+		# All done!
+		return 1;
+	}
+
 	# Check if we have already sent the response
-	my $wheel = $response->_WHEEL;
-	if ( $_[HEAP]->{'WHEELS'}->{ $wheel }->[1] ) {
+	if ( $_[HEAP]->{'REQUESTS'}->{ $id }->[1] ) {
 		# Tried to send twice!
 		die 'Tried to send a response to the same connection twice!';
 	}
 
 	# Quick check to see if the wheel/socket died already...
 	# Initially reported by Tim Wood
-	if ( ! defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0] or ! defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+	if ( ! defined $_[HEAP]->{'REQUESTS'}->{ $id }->[0] or ! defined $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
 		if ( DEBUG ) {
 			warn 'Tried to send data over a closed/nonexistant socket!';
 		}
@@ -592,14 +697,14 @@ sub Got_Output {
 	}
 
 	# Send it out!
-	$_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->put( $response );
+	$_[HEAP]->{'REQUESTS'}->{ $id }->[0]->put( $response );
 
 	# Mark this socket done
-	$_[HEAP]->{'WHEELS'}->{ $wheel }->[1] = 1;
+	$_[HEAP]->{'REQUESTS'}->{ $id }->[1] = 1;
 
 	# Debug stuff
 	if ( DEBUG ) {
-		warn "Completed with Wheel ID $wheel";
+		warn "Completed with Wheel ID $id";
 	}
 
 	# Success!
@@ -607,7 +712,7 @@ sub Got_Output {
 }
 
 # Closes the connection
-sub CloseConnection {
+sub Request_Close {
 	# ARG0 = HTTP::Response object
 	my $response = $_[ ARG0 ];
 
@@ -622,53 +727,30 @@ sub CloseConnection {
 	}
 
 	# Get the wheel ID
-	my $wheel = $response->_WHEEL;
+	my $id = $response->_WHEEL;
+
+	# Check if the wheel exists ( sometimes it gets closed by the client, but the application doesn't know that... )
+	if ( ! exists $_[HEAP]->{'REQUESTS'}->{ $id } ) {
+		# Debug stuff
+		if ( DEBUG ) {
+			warn 'Wheel disappeared, but the application sent us a CLOSE event, discarding it';
+		}
+
+		# All done!
+		return 1;
+	}
 
 	# Kill it!
-	if ( defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0] and defined $_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
-		$_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->shutdown_input;
-		$_[HEAP]->{'WHEELS'}->{ $wheel }->[0]->shutdown_output;
+	if ( defined $_[HEAP]->{'REQUESTS'}->{ $id }->[0] and defined $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] ) {
+		$_[HEAP]->{'REQUESTS'}->{ $id }->[0]->shutdown_input;
+		$_[HEAP]->{'REQUESTS'}->{ $id }->[0]->shutdown_output;
 	}
 
 	# Delete it!
-	delete $_[HEAP]->{'WHEELS'}->{ $wheel }->[0];
-	delete $_[HEAP]->{'WHEELS'}->{ $wheel };
+	delete $_[HEAP]->{'REQUESTS'}->{ $id }->[0];
+	delete $_[HEAP]->{'REQUESTS'}->{ $id };
 
 	# All done!
-	return 1;
-}
-
-# Got some sort of error from ReadWrite
-sub Got_Error {
-	# ARG0 = operation, ARG1 = error number, ARG2 = error string, ARG3 = wheel ID
-	my ( $operation, $errnum, $errstr, $wheel_id ) = @_[ ARG0 .. ARG3 ];
-
-	# Debug stuff
-	if ( DEBUG ) {
-		warn "Wheel $wheel_id generated $operation error $errnum: $errstr\n";
-	}
-
-	# Delete this connection
-	delete $_[HEAP]->{'WHEELS'}->{ $wheel_id };
-
-	# Success!
-	return 1;
-}
-
-# Got some sort of error from SocketFactory
-sub Got_ServerError {
-	# ARG0 = operation, ARG1 = error number, ARG2 = error string, ARG3 = wheel ID
-	my ( $operation, $errnum, $errstr, $wheel_id ) = @_[ ARG0 .. ARG3 ];
-
-	# Debug stuff
-	if ( DEBUG ) {
-		warn "SocketFactory Wheel $wheel_id generated $operation error $errnum: $errstr\n";
-	}
-
-	# Setup the SocketFactory wheel
-	$_[KERNEL]->call( $_[SESSION], 'SetupWheel' );
-
-	# Success!
 	return 1;
 }
 
@@ -790,6 +872,25 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.08
+
+	Made the SHUTDOWN event more smarter with the 'GRACEFUL' argument
+	Added the STARTLISTEN event to complement the STOPLISTEN event
+	Caught a minor bug -> If the client closed the socket and SimpleHTTP got an socket error, it will delete the wheel, resulting in confusion when we get the DONE/CLOSE event
+	Added $response->connection->dead boolean argument to check for the presence of a dead client
+	Re-jigging of internals ;)
+	Documented the only way to leak memory in SimpleHTTP ( hopefully heh )
+	Added the end-run leak checking to bite programmers that discard SimpleHTTP::Response objects :-)
+
+	I am considering putting SimpleHTTP::Response, HTTP::Request, SimpleHTTP::Connection into one super-object, called SimpleHTTP::Request
+	This object will have the HTTP::Request, HTTP::Response, SimpleHTTP::Connection objects hanging off it:
+		$client->request()	# HTTP::Request
+		$client->response()	# HTTP::Response
+		$client->connection()	# SimpleHTTP::Connection
+
+	If I get enough ayes from people, I will go ahead and implement this change for a cleaner design.
+	E-MAIL me your opinion or it will be ignored :)
 
 =head2 1.07
 
@@ -918,7 +1019,7 @@ Pseudocode is: if ( $path =~ /$DIR/ )
 NOTE: The path is UNIX style, not MSWIN style ( /blah/foo not \blah\foo )
 
 Now, if you supply 100 handlers, how will SimpleHTTP know what to do? Simple! By passing in an array in the first place,
-you have already told SimpleHTTP the order of your handlers. They will be tried in order, and if one is not found,
+you have already told SimpleHTTP the order of your handlers. They will be tried in order, and if a match is not found,
 SimpleHTTP will DIE!
 
 This allows some cool things like specifying 3 handlers with DIR of:
@@ -941,11 +1042,14 @@ NOTE: If ARG0 is undef, that means POE::Filter::HTTPD encountered an error parsi
 object and send some sort of generic error. SimpleHTTP will set the path used in matching the DIR regexes to an empty string, so if there
 is a "catch-all" DIR regex like '.*', it will catch the errors, and only that one.
 
+NOTE: The only way SimpleHTTP will leak memory ( hopefully heh ) is if you discard the SimpleHTTP::Response object without sending it
+back to SimpleHTTP via the DONE/CLOSE events, so never do that!
+
 =back
 
 =head2 Events
 
-SimpleHTTP is so simple, there are only 6 events available.
+SimpleHTTP is so simple, there are only 7 events available.
 
 =over 4
 
@@ -983,16 +1087,24 @@ SimpleHTTP is so simple, there are only 6 events available.
 
 	BEWARE: if there is an error in the HANDLERS, SimpleHTTP will die!
 
-=item C<SHUTDOWN>
+=item C<STARTLISTEN>
 
-	Calling this event makes SimpleHTTP shut down by closing it's TCP socket.
-	Also, this will close all sockets that are still lingering ( sent to your handler, but not received ).
-	The alias will also be removed, making this instance vanish.
+	Starts the listening socket, if it was shut down
 
 =item C<STOPLISTEN>
 
-	Calling this event makes SimpleHTTP shutdown the listening socket, but is still awaiting the SHUTDOWN event to completely kill itself.
-	This will not close any lingering sockets, nor kill it's alias, so you still can post DONE/CLOSE/SHUTDOWN events to it.
+	Simply a wrapper for SHUTDOWN GRACEFUL, but will not shutdown SimpleHTTP if there is no more requests
+
+=item C<SHUTDOWN>
+
+	Without arguments, SimpleHTTP does this:
+		Close the listening socket
+		Kills all pending requests by closing their sockets
+		Removes it's alias
+
+	With an argument of 'GRACEFUL', SimpleHTTP does this:
+		Close the listening socket
+		Waits for all pending requests to come in via DONE/CLOSE, then removes it's alias
 
 =back
 
@@ -1007,7 +1119,7 @@ You can enable debugging mode by doing this:
 	sub POE::Component::Server::SimpleHTTP::DEBUG () { 1 }
 	use POE::Component::Server::SimpleHTTP;
 
-Also, this module will try to keep the SocketFactory wheel alive.
+Also, this module will try to keep the Listening socket alive.
 if it dies, it will open it again for a max of 5 retries.
 
 You can override this behavior by doing this:
@@ -1045,19 +1157,17 @@ Nothing.
 
 =head1 SEE ALSO
 
-L<POE>
+	L<POE>
 
-L<POE::Component::Server::HTTP>
+	L<POE::Filter::HTTPD>
 
-L<POE::Filter::HTTPD>
+	L<HTTP::Request>
 
-L<HTTP::Request>
+	L<HTTP::Response>
 
-L<HTTP::Response>
+	L<POE::Component::Server::SimpleHTTP::Connection>
 
-L<POE::Component::Server::SimpleHTTP::Connection>
-
-L<POE::Component::Server::SimpleHTTP::Response>
+	L<POE::Component::Server::SimpleHTTP::Response>
 
 =head1 AUTHOR
 
