@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 
 # Import what we need from the POE namespace
 use POE;			# For the constants
@@ -185,6 +185,7 @@ sub new {
 			'Got_Connection'	=>	\&Got_Connection,
 			'Got_Input'		=>	\&Got_Input,
 			'Got_Flush'		=>	\&Got_Flush,
+			'Got_Error'		=>	\&Got_Error,
 
 			# Send output to connection!
 			'DONE'		=>	\&Got_Output,
@@ -517,6 +518,10 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.02
+
+	Small fix regarding the Got_Error routine for Wheel::ReadWrite
 
 =head2 1.01
 

@@ -3,3 +3,6 @@ Revision history for Perl extension POE::Component::Server::SimpleHTTP.
 1.01  Sat Nov 29 16:35:58 2003
 	- original version; created by h2xs 1.22 with options
 	-AXn POE::Component::Server::SimpleHTTP
+
+1.02 Sat Nov 29 23:25:54 2003
+	- Fixed silly ReadWrite Got_Error event
