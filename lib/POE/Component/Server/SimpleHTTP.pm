@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.10';
+our $VERSION = '1.11';
 
 # Import what we need from the POE namespace
 use POE;
@@ -606,7 +606,9 @@ sub Got_Input {
 		}
 
 		# Stuff the default headers
-		$response->header( %{ $_[HEAP]->{'HEADERS'} } );
+		if ( keys( %{ $_[HEAP]->{'HEADERS'} } ) != 0 ) {
+			$response->header( %{ $_[HEAP]->{'HEADERS'} } );
+		}
 	}
 
 	# Check if the SimpleHTTP::Connection object croaked ( happens when sockets just disappear )
@@ -828,82 +830,6 @@ sub Request_Close {
 	return 1;
 }
 
-# SSL-enables the connection
-sub Request_SSLify {
-	# ARG0 = HTTP::Response object
-	my $response = $_[ ARG0 ];
-
-	# Automatically fail if we don't have SSL
-	if ( ! defined $_[HEAP]->{'SSLKEYCERT'} ) {
-		if ( DEBUG ) {
-			warn 'Tried to SSLify a request, but was not able to load PoCo::SSLify';
-		}
-		return 1;
-	}
-
-	# Check if we got it
-	if ( ! defined $response or ! UNIVERSAL::isa( $response, 'HTTP::Response' ) ) {
-		if ( DEBUG ) {
-			warn 'Did not get a HTTP::Response object!';
-		}
-
-		# Abort...
-		return undef;
-	}
-
-	# Get the wheel ID
-	my $id = $response->_WHEEL;
-
-	# Check if the wheel exists ( sometimes it gets closed by the client, but the application doesn't know that... )
-	if ( ! exists $_[HEAP]->{'REQUESTS'}->{ $id } ) {
-		# Debug stuff
-		if ( DEBUG ) {
-			warn 'Wheel disappeared, but the application sent us a SSLify event, discarding it';
-		}
-
-		# All done!
-		return 1;
-	}
-
-	# Okay, convert it to SSL and redo the wheel!
-
-	# Hack ReadWrite so we can pause kernel read/write on it's socket
-	$_[KERNEL]->select( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] );
-	$_[KERNEL]->select( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] );
-
-	# Okay, replace the socket!
-	my $new_socket = undef;
-	eval {
-		$new_socket = POE::Component::SSLify::Server_SSLify( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] );
-	};
-	if ( $@ ) {
-		if ( DEBUG ) {
-			warn "Unable to SSLify -> $@";
-		}
-
-		# Just act as if nothing happened...
-		return 0;
-	}
-
-	# Replace the socket!
-	$_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ] = $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] = $new_socket;
-
-	# Okay, tell the connection object that it is SSLified!
-	$_[HEAP]->{'REQUESTS'}->{ $id }->[2]->{'CONNECTION'}->{'SSLified'} = 1;
-
-	# Reinstate the read/write selects
-	$_[KERNEL]->select_write( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ], $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::STATE_WRITE ] );
-	$_[KERNEL]->select_read( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_INPUT ], $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::STATE_READ ] );
-
-	# Pause the write select immediately, unless output is pending.
-	if ( ! $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::DRIVER_BUFFERED_OUT_OCTETS ] ) {
-		$_[KERNEL]->select_pause_write( $_[HEAP]->{'REQUESTS'}->{ $id }->[0]->[ POE::Wheel::ReadWrite::HANDLE_OUTPUT ] );
-	}
-
-	# All done!
-	return 1;
-}
-
 # End of module
 1;
 
@@ -1025,6 +951,11 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 	An easy to use HTTP daemon for POE-enabled programs
 
 =head1 CHANGES
+
+=head2 1.11
+
+	Fixed the bug where no HEADERS resulted in a explosion, thanks BinGOs!
+	PreForking added, look at SimpleHTTP::PreFork, thanks Stephen!
 
 =head2 1.10
 
@@ -1341,6 +1272,8 @@ Nothing.
 
 	L<POE::Component::Server::SimpleHTTP::Response>
 
+	L<POE::Component::Server::SimpleHTTP::PreFork>
+
 	L<POE::Component::SSLify>
 
 =head1 AUTHOR
@@ -1349,7 +1282,7 @@ Apocalypse E<lt>apocal@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2004 by Apocalypse
+Copyright 2005 by Apocalypse
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

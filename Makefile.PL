@@ -1,8 +1,5 @@
 use ExtUtils::MakeMaker;
 
-# Ask users if they want SSL support
-my $value = prompt( 'Do you want SSL support ( via SSLify ) [Y/n]?', 'Y' );
-
 # Build the prerequisite list
 my $prereqs = {
 	'HTTP::Date'			=>	0,
@@ -19,9 +16,20 @@ my $prereqs = {
 	'HTTP::Response'		=>	0,
 };
 
+# Ask users if they want SSL support
+my $value = prompt( 'Do you want SSL support ( requires POE::Component::SSLify ) [Y/n]?', 'Y' );
+
 # Add to the prereqs PoCo::SSLify?
 if ( $value =~ /^Y$/i ) {
 	$prereqs->{ 'POE::Component::SSLify' } = '0.04';
+}
+
+# Ask users if they want PreFork support
+$value = prompt( 'Do you want PreFork support ( requires IPC::Shareable ) [Y/n]?', 'Y' );
+
+# Add to the prereqs IPC::Shareable?
+if ( $value =~ /^Y$/i ) {
+	$prereqs->{ 'IPC::Shareable' } = '0';
 }
 
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence

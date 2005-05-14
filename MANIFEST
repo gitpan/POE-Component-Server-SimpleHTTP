@@ -1,6 +1,7 @@
 lib/POE/Component/Server/SimpleHTTP.pm
 lib/POE/Component/Server/SimpleHTTP/Response.pm
 lib/POE/Component/Server/SimpleHTTP/Connection.pm
+lib/POE/Component/Server/SimpleHTTP/PreFork.pm
 Makefile.PL
 MANIFEST
 README
