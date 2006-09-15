@@ -5,11 +5,10 @@
 
 # change 'tests => 1' to 'tests => last_test_to_print';
 
-use Test::More tests => 4;
+use Test::More tests => 3;
 BEGIN {
 	use_ok( 'POE::Component::Server::SimpleHTTP::Connection' );
 	use_ok( 'POE::Component::Server::SimpleHTTP::Response' );
-	use_ok( 'POE::Component::Server::SimpleHTTP::PreFork' );
 	use_ok( 'POE::Component::Server::SimpleHTTP' );
 };
 

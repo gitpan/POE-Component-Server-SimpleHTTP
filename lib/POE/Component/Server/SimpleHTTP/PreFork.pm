@@ -1100,12 +1100,6 @@ POE::Component::Server::SimpleHTTP::PreFork - PreForking support for SimpleHTTP
 
 	Subclass of SimpleHTTP for PreForking support
 
-=head1 CHANGES
-
-=head2 0.01
-
-	Initial revision
-
 =head1 New Constructor Options
 
 =over 5
@@ -1219,7 +1213,7 @@ Stephen Butler E<lt>stephen.butler@gmail.comE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2005 by Apocalypse + Stephen Butler
+Copyright 2006 by Apocalypse + Stephen Butler
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

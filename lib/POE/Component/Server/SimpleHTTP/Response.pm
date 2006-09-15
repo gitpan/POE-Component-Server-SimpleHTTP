@@ -68,21 +68,6 @@ POE::Component::Server::SimpleHTTP::Response - Emulates a HTTP::Response object,
 
 	print $response->connection->remote_ip;
 
-=head1 CHANGES
-
-=head2 1.03
-
-	Removed some unnecessary variables
-
-=head2 1.02
-
-	POD Formatting
-	Moved the SimpleHTTP::Connection object here from SimpleHTTP::Request
-
-=head2 1.01
-
-	Initial Revision
-
 =head1 DESCRIPTION
 
 	This module is used as a drop-in replacement, because we need to store the wheel ID + connection object for the response.
@@ -105,7 +90,7 @@ Apocalypse E<lt>apocal@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2004 by Apocalypse
+Copyright 2006 by Apocalypse
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

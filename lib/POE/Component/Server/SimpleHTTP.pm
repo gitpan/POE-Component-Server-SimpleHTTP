@@ -6,7 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.11';
+our $VERSION = '1.12';
 
 # Import what we need from the POE namespace
 use POE;
@@ -613,6 +613,11 @@ sub Got_Input {
 
 	# Check if the SimpleHTTP::Connection object croaked ( happens when sockets just disappear )
 	if ( ! defined $response->{'CONNECTION'} ) {
+		# Debug stuff
+		if ( DEBUG ) {
+			warn "could not make connection object";
+		}
+
 		# Destroy this wheel!
 		delete $_[HEAP]->{'REQUESTS'}->{ $id }->[0];
 		delete $_[HEAP]->{'REQUESTS'}->{ $id };
@@ -698,16 +703,19 @@ sub Got_Error {
 	# ARG0 = operation, ARG1 = error number, ARG2 = error string, ARG3 = wheel ID
 	my ( $operation, $errnum, $errstr, $id ) = @_[ ARG0 .. ARG3 ];
 
-	# Debug stuff
-	if ( DEBUG ) {
-		warn "Wheel $id generated $operation error $errnum: $errstr\n";
+	# Only do this for non-EOF on read
+	unless ( $operation eq 'read' and $errnum == 0 ) {
+		# Debug stuff
+		if ( DEBUG ) {
+			warn "Wheel $id generated $operation error $errnum: $errstr\n";
+		}
+
+		# Make the client dead
+		$_[HEAP]->{'REQUESTS'}->{ $id }->[2]->{'CONNECTION'}->{'DIED'} = 1;
+
+		# Delete this connection
+		delete $_[HEAP]->{'REQUESTS'}->{ $id };
 	}
-
-	# Make the client dead
-	$_[HEAP]->{'REQUESTS'}->{ $id }->[2]->{'CONNECTION'}->{'DIED'} = 1;
-
-	# Delete this connection
-	delete $_[HEAP]->{'REQUESTS'}->{ $id };
 
 	# Success!
 	return 1;
@@ -764,6 +772,7 @@ sub Request_Output {
 
 	# Set the Content-Length if needed
 	if ( ! $response->header( 'Content-Length' ) ) {
+		use bytes;
 		$response->header( 'Content-Length', length( $response->content ) );
 	}
 
@@ -949,92 +958,6 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 =head1 ABSTRACT
 
 	An easy to use HTTP daemon for POE-enabled programs
-
-=head1 CHANGES
-
-=head2 1.11
-
-	Fixed the bug where no HEADERS resulted in a explosion, thanks BinGOs!
-	PreForking added, look at SimpleHTTP::PreFork, thanks Stephen!
-
-=head2 1.10
-
-	Rearranged some DEBUG printouts
-	Added some more 'return 1;' for POEization
-	Fixed STOPLISTEN/STARTLISTEN error
-	Added experimental SSL support via PoCo::SSLify
-
-=head2 1.09
-
-	Fixed a small bug regarding the timing of SHUTDOWN GRACEFUL
-	I always forget to supply the session parameter to $kernel->call() :X
-
-=head2 1.08
-
-	Made the SHUTDOWN event more smarter with the 'GRACEFUL' argument
-	Added the STARTLISTEN event to complement the STOPLISTEN event
-	Caught a minor bug -> If the client closed the socket and SimpleHTTP got an socket error, it will delete the wheel, resulting in confusion when we get the DONE/CLOSE event
-	Added $response->connection->dead boolean argument to check for the presence of a dead client
-	Re-jigging of internals ;)
-	Documented the only way to leak memory in SimpleHTTP ( hopefully heh )
-	Added the end-run leak checking to bite programmers that discard SimpleHTTP::Response objects :-)
-
-	I am considering putting SimpleHTTP::Response, HTTP::Request, SimpleHTTP::Connection into one super-object, called SimpleHTTP::Request
-	This object will have the HTTP::Request, HTTP::Response, SimpleHTTP::Connection objects hanging off it:
-		$client->request()	# HTTP::Request
-		$client->response()	# HTTP::Response
-		$client->connection()	# SimpleHTTP::Connection
-
-	If I get enough ayes from people, I will go ahead and implement this change for a cleaner design.
-	E-MAIL me your opinion or it will be ignored :)
-
-=head2 1.07
-
-	Added the STOPLISTEN event, to make it shutdown the listening socket to help larger programs shutdown cleanly
-	Removed the CHANGES file, as it is redundant :)
-	Added "return 1;" everywhere I could to avoid the nasty copy-on-exit POE bug squashed in 1.05
-
-=head2 1.06
-
-	Fixed SHUTDOWN to cleanly kill sockets, checking for definedness first
-	Fixed new() to remove options that exist, but is undef -> results in croaking when DEBUG is on
-	Added the CLOSE event to kill sockets without sending any output
-
-=head2 1.05
-
-	Got rid of POE::Component::Server::TCP and replaced it with POE::Wheel::SocketFactory for speed/efficiency
-	As the documentation for POE::Filter::HTTPD says, updated POD to reflect the HTTP::Request/Response issue
-	Got rid of SimpleHTTP::Request, due to moving of the Connection object to Response
-		->	Found a circular leak by having SimpleHTTP::Connection in SimpleHTTP::Request, to get rid of it, moved it to Response
-		->	Realized that sometimes HTTP::Request will be undef, so how would you get the Connection object?
-	Internal tweaking to save some memory
-	Added the MAX_RETRIES subroutine
-	More extensive DEBUG statements
-	POD updates
-	Paul Visscher tracked down the HTTP::Request object leak, thanks!
-	Cleaned up the Makefile.PL
-	Benchmarked and found a significant speed difference between post()ing and call()ing the DONE event
-		-> The call() method is ~8% faster
-		-> However, the chance of connecting sockets timing out is greater...
-
-=head2 1.04
-
-	Fixed a bug reported by Tim Wood about socket disappearing
-	Fixed *another* bug in the Connection object, pesky CaPs! ( Again, reported by Tim Wood )
-
-=head2 1.03
-
-	Added the GETHANDLERS/SETHANDLERS event
-	POD updates
-	Fixed SimpleHTTP::Connection to get rid of the funky CaPs
-
-=head2 1.02
-
-	Small fix regarding the Got_Error routine for Wheel::ReadWrite
-
-=head2 1.01
-
-	Initial Revision
 
 =head1 DESCRIPTION
 
@@ -1282,7 +1205,7 @@ Apocalypse E<lt>apocal@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2005 by Apocalypse
+Copyright 2006 by Apocalypse
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

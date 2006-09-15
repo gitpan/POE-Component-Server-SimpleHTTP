@@ -1,7 +1,7 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         POE-Component-Server-SimpleHTTP
-version:      1.11
+version:      1.12
 version_from: lib/POE/Component/Server/SimpleHTTP.pm
 installdirs:  site
 requires:
@@ -9,7 +9,6 @@ requires:
     HTTP::Date:                    0
     HTTP::Request:                 0
     HTTP::Response:                0
-    IPC::Shareable:                0
     POE:                           0.27
     POE::Component::SSLify:        0.04
     POE::Driver::SysRW:            0
