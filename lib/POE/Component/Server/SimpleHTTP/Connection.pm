@@ -6,6 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
+# $Revision: 1181 $
 our $VERSION = '1.05';
 
 # Get some things we need

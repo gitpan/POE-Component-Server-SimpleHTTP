@@ -5,6 +5,8 @@ lib/POE/Component/Server/SimpleHTTP/PreFork.pm
 Makefile.PL
 MANIFEST
 README
-t/1.t
+t/1_load.t
+t/2_pod.t
 META.yml                                 Module meta-data (added by MakeMaker)
 Changes
+examples/server.pl

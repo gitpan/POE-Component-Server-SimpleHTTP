@@ -6,7 +6,8 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
-our $VERSION = '1.12';
+# $Revision: 1181 $
+our $VERSION = '1.13';
 
 # Import what we need from the POE namespace
 use POE;
@@ -143,7 +144,7 @@ sub new {
 	# Get the HEADERS
 	if ( exists $opt{'HEADERS'} and defined $opt{'HEADERS'} ) {
 		# Make sure it is ref to hash
-		if ( ref( $opt{'HEADERS'} ) and ref( $opt{'HEADERS'} ) eq 'HASH' ) {
+		if ( ref $opt{'HEADERS'} and ref( $opt{'HEADERS'} ) eq 'HASH' ) {
 			$HEADERS = $opt{'HEADERS'};
 			delete $opt{'HEADERS'};
 		} else {
@@ -162,7 +163,7 @@ sub new {
 	# Get the HANDLERS
 	if ( exists $opt{'HANDLERS'} and defined $opt{'HANDLERS'} ) {
 		# Make sure it is ref to array
-		if ( ref( $opt{'HANDLERS'} ) and ref( $opt{'HANDLERS'} ) eq 'ARRAY' ) {
+		if ( ref $opt{'HANDLERS'} and ref( $opt{'HANDLERS'} ) eq 'ARRAY' ) {
 			$HANDLERS = $opt{'HANDLERS'};
 			delete $opt{'HANDLERS'};
 		} else {
@@ -442,7 +443,7 @@ sub MassageHandlers {
 	my $handler = shift;
 
 	# Make sure it is ref to array
-	if ( ! ref( $handler ) or ref( $handler ) ne 'ARRAY' ) {
+	if ( ! ref $handler or ref( $handler ) ne 'ARRAY' ) {
 		croak( "HANDLERS is not a ref to an array!" );
 	}
 
@@ -450,7 +451,7 @@ sub MassageHandlers {
 	my $count = 0;
 	while ( $count < scalar( @$handler ) ) {
 		# Must be ref to hash
-		if ( ref( $handler->[ $count ] ) and ref( $handler->[ $count ] ) eq 'HASH' ) {
+		if ( ref $handler->[ $count ] and ref( $handler->[ $count ] ) eq 'HASH' ) {
 			# Make sure it got the 3 parts necessary
 			if ( ! exists $handler->[ $count ]->{'SESSION'} or ! defined $handler->[ $count ]->{'SESSION'} ) {
 				croak( "HANDLER number $count does not have a SESSION argument!" );

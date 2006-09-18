@@ -1,5 +1,5 @@
-POE/Component/Server/SimpleHTTP version 1.11
-============================================
+POE/Component/Server/SimpleHTTP
+===============================
 
 INSTALLATION
 
@@ -10,35 +10,7 @@ To install this module type the following:
    make test
    make install
 
-DEPENDENCIES
+MORE INFO
 
-This module requires these other modules and libraries:
-
-	POE > 0.27
-		POE::Wheel::ReadWrite
-		POE::Driver::SysRW
-		POE::Filter::HTTPD
-		POE::Wheel::SocketFactory
-
-	Carp
-
-	HTTP::Date
-	HTTP::Request
-	HTTP::Response
-
-	Socket
-
-	Sys::Hostname
-
-	Storable
-
-	POE::Component::SSLify
-
-	IPC::Shareable
-
-COPYRIGHT AND LICENSE
-
-Copyright 2004 by Apocalypse
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
+	# After installing:
+	perldoc POE::Component::Server::SimpleHTTP

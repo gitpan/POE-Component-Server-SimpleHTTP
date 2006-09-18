@@ -6,10 +6,6 @@ my $prereqs = {
 	'Carp'				=>	0,
 	'Sys::Hostname'			=>	0,
 	'POE'				=>	'0.27',
-	'POE::Wheel::ReadWrite'		=>	0,
-	'POE::Driver::SysRW'		=>	0,
-	'POE::Filter::HTTPD'		=>	0,
-	'POE::Wheel::SocketFactory'	=>	0,
 	'Storable'			=>	0,
 	'Socket'			=>	0,
 	'HTTP::Request'			=>	0,
@@ -38,6 +34,18 @@ WriteMakefile(
 	'NAME'		=>	'POE::Component::Server::SimpleHTTP',
 	'VERSION_FROM'	=>	'lib/POE/Component/Server/SimpleHTTP.pm', # finds $VERSION
 	'PREREQ_PM'	=>	$prereqs,
-	'ABSTRACT_FROM'	=>	'lib/POE/Component/Server/SimpleHTTP.pm', # retrieve abstract from module
-	'AUTHOR'	=>	'Apocalypse <APOCAL@cpan.org>',
+	(	$] >= 5.005 ?		# Add new keywords
+		(
+			'ABSTRACT_FROM'	=> 'lib/POE/Component/Server/SimpleHTTP.pm', # retrieve abstract from module
+			'AUTHOR'	=> 'Apocalypse <APOCAL@cpan.org>',
+		) : ()
+	),
+
+	# Thanks POE!
+	'dist'		=> {
+		'PREOP'		=> (
+			"echo 'license: perl' >> ./META.yml;" .
+			'/bin/cp -f ./META.yml ./$(DISTNAME)-$(VERSION)/META.yml &2>/dev/null'
+		),
+	},
 );

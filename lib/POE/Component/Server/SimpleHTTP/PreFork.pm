@@ -6,6 +6,7 @@ use strict qw(subs vars refs);				# Make sure we can't mess up
 use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
+# $Revision: 1181 $
 our $VERSION = '0.01';
 
 # Import what we need from the POE namespace
@@ -146,7 +147,7 @@ sub new {
 	# Get the HEADERS
 	if ( exists $opt{'HEADERS'} and defined $opt{'HEADERS'} ) {
 		# Make sure it is ref to hash
-		if ( ref( $opt{'HEADERS'} ) and ref( $opt{'HEADERS'} ) eq 'HASH' ) {
+		if ( ref $opt{'HEADERS'} and ref( $opt{'HEADERS'} ) eq 'HASH' ) {
 			$HEADERS = $opt{'HEADERS'};
 			delete $opt{'HEADERS'};
 		} else {
@@ -165,7 +166,7 @@ sub new {
 	# Get the HANDLERS
 	if ( exists $opt{'HANDLERS'} and defined $opt{'HANDLERS'} ) {
 		# Make sure it is ref to array
-		if ( ref( $opt{'HANDLERS'} ) and ref( $opt{'HANDLERS'} ) eq 'ARRAY' ) {
+		if ( ref $opt{'HANDLERS'} and ref( $opt{'HANDLERS'} ) eq 'ARRAY' ) {
 			$HANDLERS = $opt{'HANDLERS'};
 			delete $opt{'HANDLERS'};
 		} else {
@@ -178,7 +179,7 @@ sub new {
 	# Get the FORKHANDLERS
 	if ( exists $opt{'FORKHANDLERS'} and defined $opt{'FORKHANDLERS'} ) {
 		# Make sure it is ref to a hash
-		if ( ref( $opt{'FORKHANDLERS'} ) and ref( $opt{'FORKHANDLERS'} ) eq 'HASH' ) {
+		if ( ref $opt{'FORKHANDLERS'} and ref( $opt{'FORKHANDLERS'} ) eq 'HASH' ) {
 			$FORKHANDLERS = $opt{'FORKHANDLERS'};
 			delete $opt{'FORKHANDLERS'};
 		} else {
