@@ -7,7 +7,7 @@ use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
 # $Revision: 1181 $
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 # Set our stuff to HTTP::Response
 use base qw( HTTP::Response );
@@ -54,6 +54,17 @@ sub connection {
 	return shift->{'CONNECTION'};
 }
 
+sub stream {
+   my $self = shift;
+   
+	$self->{'STREAM'}       = shift;
+  
+}
+sub is_streaming {
+   my $self = shift;
+   
+	$self->{'IS_STREAMING'}       = 1;
+}
 # End of module
 1;
 

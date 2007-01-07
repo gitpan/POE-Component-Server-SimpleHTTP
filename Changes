@@ -1,5 +1,11 @@
 Revision history for Perl extension POE::Component::Server::SimpleHTTP.
 
+* 1.14
+
+	Changed the defaults for the Prefork and SSLify to 'no'. 
+	Applied streaming support patches from eriam.
+	Converted Makefile.PL to Module::Install.
+
 * 1.13
 
 	learned about the difference between ref $self and ref( $self )
