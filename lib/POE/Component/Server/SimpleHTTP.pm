@@ -7,7 +7,7 @@ use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
 # $Revision: 1181 $
-our $VERSION = '1.14';
+our $VERSION = '1.15';
 
 # Import what we need from the POE namespace
 use POE;
@@ -68,7 +68,8 @@ sub new {
 
 			# Okay, pull in what is necessary
 			eval {
-				use POE::Component::SSLify qw( SSLify_Options SSLify_GetSocket Server_SSLify SSLify_GetCipher );
+				require POE::Component::SSLify; 
+				import POE::Component::SSLify qw( SSLify_Options SSLify_GetSocket Server_SSLify SSLify_GetCipher );
 				SSLify_Options( @$SSLKEYCERT );
 			};
 			if ( $@ ) {
