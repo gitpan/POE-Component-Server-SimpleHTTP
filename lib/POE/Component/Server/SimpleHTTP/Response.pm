@@ -63,7 +63,9 @@ sub stream {
 sub is_streaming {
    my $self = shift;
    
-	$self->{'IS_STREAMING'}       = 1;
+	$self->{'IS_STREAMING'} = $_[0] if defined $_[0];
+	
+	return $self->{'IS_STREAMING'} || 0;
 }
 # End of module
 1;

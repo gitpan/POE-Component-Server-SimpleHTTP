@@ -17,4 +17,4 @@ requires:
   Socket: 0
   Storable: 0
   Sys::Hostname: 0
-version: 1.16
+version: 1.17

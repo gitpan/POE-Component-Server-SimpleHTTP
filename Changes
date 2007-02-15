@@ -1,112 +1,61 @@
-Revision history for Perl extension POE::Component::Server::SimpleHTTP.
+========================
+2007-02-15 14:47:56 1.17
+========================
 
-* 1.16
+  2007-02-15 14:46:02 (r10) by bingos; t/4_test_kwalitee.t A
 
-	Kwalitee fixes.
+    Added kwalitee test. 
 
-* 1.15	
+  2007-02-15 14:45:34 (r9) by bingos
+  tools A; Changes.old A; lib/POE/Component/Server/SimpleHTTP.pm M;
+  META.yml D; MANIFEST M; tools/svn-log.perl A; Changes R
 
-	Changed SSLify to require instead of use.
+    Added LOGHANDLER directive for general logging duties. Deprecated the
+    Changes to Changes.old, added svn logging for the future Changes
+    file. 
 
-* 1.14
+  2007-02-05 21:36:44 (r8) by eriam
+  lib/POE/Component/Server/SimpleHTTP/Response.pm M
 
-	Changed the defaults for the Prefork and SSLify to 'no'. 
-	Applied streaming support patches from eriam.
-	Converted Makefile.PL to Module::Install.
+    ! is_streaming
 
-* 1.13
+  2007-02-03 19:02:35 (r7) by eriam
+  lib/POE/Component/Server/SimpleHTTP.pm M
 
-	learned about the difference between ref $self and ref( $self )
-	Kwalitee-related fixes
+    + is_streaming needs a 1 to be initialized
 
-* 1.12
+  2007-02-03 19:01:03 (r6) by eriam
+  lib/POE/Component/Server/SimpleHTTP/Response.pm M
 
-	Finally use a Changes file - thanks RT #18981
-	Added some debug stuff
-	Cleanup of POD files
-	Fixed a long-standing bug of closing requests if they sent a EOF
-	Removed the PreFork test ( cannot disable if told installer to not install it! )
+    ! is_streaming can now be used to test if a response is actually in
+    streaming mode
 
-* 1.11
+========================
+2007-01-29 15:13:13 1.16
+========================
 
-	Fixed the bug where no HEADERS resulted in a explosion, thanks BinGOs!
-	PreForking added, look at SimpleHTTP::PreFork, thanks Stephen!
+  2007-01-29 15:07:26 (r4) by bingos
+  lib/POE/Component/Server/SimpleHTTP.pm M; MANIFEST M; Changes M; inc D
 
-* 1.10
+    Kwalitee fixes
 
-	Rearranged some DEBUG printouts
-	Added some more 'return 1;' for POEization
-	Fixed STOPLISTEN/STARTLISTEN error
-	Added experimental SSL support via PoCo::SSLify
+  2007-01-19 16:10:20 (r1) by svn
+  README A; inc/Module A; /trunk A; lib/POE/Component/Server A;
+  inc/Module/Install/WriteAll.pm A; t A;
+  lib/POE/Component/Server/SimpleHTTP/Response.pm A; t/1_load.t A;
+  lib/POE/Component/Server/SimpleHTTP.pm A; t/2_pod.t A; inc A;
+  lib/POE/Component/Server/SimpleHTTP/PreFork.pm A; examples A;
+  inc/Module/Install.pm A; /branches A;
+  lib/POE/Component/Server/SimpleHTTP A; lib/POE/Component A;
+  inc/Module/Install/Makefile.pm A; examples/server.pl A;
+  inc/Module/Install/Metadata.pm A;
+  lib/POE/Component/Server/SimpleHTTP/Connection.pm A; inc/Module/Install
+  A; lib A; MANIFEST A; Changes A; inc/Module/Install/Fetch.pm A;
+  inc/Module/Install/Can.pm A; inc/Module/Install/Win32.pm A; META.yml A;
+  Makefile.PL A; lib/POE A; inc/Module/Install/Base.pm A; /tags A
 
-* 1.09
+    Initial repository layout
 
-	Fixed a small bug regarding the timing of SHUTDOWN GRACEFUL
-	I always forget to supply the session parameter to $kernel->call() :X
-
-* 1.08
-
-	Made the SHUTDOWN event more smarter with the 'GRACEFUL' argument
-	Added the STARTLISTEN event to complement the STOPLISTEN event
-	Caught a minor bug -> If the client closed the socket and SimpleHTTP got an socket error, it will delete the wheel, resulting in confusion when we get the DONE/CLOSE event
-	Added $response->connection->dead boolean argument to check for the presence of a dead client
-	Re-jigging of internals ;)
-	Documented the only way to leak memory in SimpleHTTP ( hopefully heh )
-	Added the end-run leak checking to bite programmers that discard SimpleHTTP::Response objects :-)
-
-	I am considering putting SimpleHTTP::Response, HTTP::Request, SimpleHTTP::Connection into one super-object, called SimpleHTTP::Request
-	This object will have the HTTP::Request, HTTP::Response, SimpleHTTP::Connection objects hanging off it:
-		$client->request()	# HTTP::Request
-		$client->response()	# HTTP::Response
-		$client->connection()	# SimpleHTTP::Connection
-
-	If I get enough ayes from people, I will go ahead and implement this change for a cleaner design.
-	E-MAIL me your opinion or it will be ignored :)
-
-* 1.07
-
-	Added the STOPLISTEN event, to make it shutdown the listening socket to help larger programs shutdown cleanly
-	Removed the CHANGES file, as it is redundant :)
-	Added "return 1;" everywhere I could to avoid the nasty copy-on-exit POE bug squashed in 1.05
-
-* 1.06
-
-	Fixed SHUTDOWN to cleanly kill sockets, checking for definedness first
-	Fixed new() to remove options that exist, but is undef -> results in croaking when DEBUG is on
-	Added the CLOSE event to kill sockets without sending any output
-
-* 1.05
-
-	Got rid of POE::Component::Server::TCP and replaced it with POE::Wheel::SocketFactory for speed/efficiency
-	As the documentation for POE::Filter::HTTPD says, updated POD to reflect the HTTP::Request/Response issue
-	Got rid of SimpleHTTP::Request, due to moving of the Connection object to Response
-		->	Found a circular leak by having SimpleHTTP::Connection in SimpleHTTP::Request, to get rid of it, moved it to Response
-		->	Realized that sometimes HTTP::Request will be undef, so how would you get the Connection object?
-	Internal tweaking to save some memory
-	Added the MAX_RETRIES subroutine
-	More extensive DEBUG statements
-	POD updates
-	Paul Visscher tracked down the HTTP::Request object leak, thanks!
-	Cleaned up the Makefile.PL
-	Benchmarked and found a significant speed difference between post()ing and call()ing the DONE event
-		-> The call() method is ~8% faster
-		-> However, the chance of connecting sockets timing out is greater...
-
-* 1.04
-
-	Fixed a bug reported by Tim Wood about socket disappearing
-	Fixed *another* bug in the Connection object, pesky CaPs! ( Again, reported by Tim Wood )
-
-* 1.03
-
-	Added the GETHANDLERS/SETHANDLERS event
-	POD updates
-	Fixed SimpleHTTP::Connection to get rid of the funky CaPs
-
-* 1.02
-
-	Small fix regarding the Got_Error routine for Wheel::ReadWrite
-
-* 1.01
-
-	Initial Revision
+==============
+End of Excerpt
+==============

@@ -7,7 +7,7 @@ use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
 # $Revision: 1181 $
-our $VERSION = '1.16';
+our $VERSION = '1.17';
 
 # Import what we need from the POE namespace
 use POE;
@@ -54,7 +54,7 @@ sub new {
 	my %opt = @_;
 
 	# Our own options
-	my ( $ALIAS, $ADDRESS, $PORT, $HOSTNAME, $HEADERS, $HANDLERS, $SSLKEYCERT );
+	my ( $ALIAS, $ADDRESS, $PORT, $HOSTNAME, $HEADERS, $HANDLERS, $SSLKEYCERT, $LOGHANDLER );
 
 	# You could say I should do this: $Stuff = delete $opt{'Stuff'}
 	# But, that kind of behavior is not defined, so I would not trust it...
@@ -175,6 +175,19 @@ sub new {
 		croak( 'HANDLERS is required to create a new POE::Component::Server::SimpleHTTP instance!' );
 	}
 
+	if ( exists $opt{'LOGHANDLER'} and defined $opt{'LOGHANDLER'} ) {
+		if ( ref $opt{'LOGHANDLER'} and ref $opt{'LOGHANDLER'} eq 'HASH' ) {
+			$LOGHANDLER = delete $opt{'LOGHANDLER'};
+			croak( 'LOGHANDLER does not have a SESSION attribute' ) 
+			  unless $LOGHANDLER->{'SESSION'};
+			croak( 'LOGHANDLER does not have an EVENT attribute' ) 
+			  unless $LOGHANDLER->{'EVENT'};
+		}
+		else {
+			croak( 'LOGHANDLER must be a reference to an HASH!' );
+		}
+	}
+
 	# Anything left over is unrecognized
 	if ( DEBUG ) {
 		if ( keys %opt > 0 ) {
@@ -229,6 +242,7 @@ sub new {
 			'REQUESTS'	=>	{},
 			'RETRIES'	=>	0,
 			'SSLKEYCERT'	=>	$SSLKEYCERT,
+			'LOGHANDLER'    =>	$LOGHANDLER,
 		},
 	) or die 'Unable to create a new session!';
 
@@ -644,6 +658,13 @@ sub Got_Input {
 	$_[HEAP]->{'REQUESTS'}->{ $id }->[2] = $response;
 	$_[HEAP]->{'REQUESTS'}->{ $id }->[3] = $request;
 
+	$_[KERNEL]->post(
+	   $_[HEAP]->{'LOGHANDLER'}->{'SESSION'},
+	   $_[HEAP]->{'LOGHANDLER'}->{'EVENT'},
+	   $request,
+	   $response->connection->remote_ip(),
+	) if $_[HEAP]->{'LOGHANDLER'};
+
 	# Find which handler will handle this one
 	foreach my $handler ( @{ $_[HEAP]->{'HANDLERS'} } ) {
 		# Check if this matches
@@ -832,14 +853,20 @@ sub Request_Output {
             	
             	#
                $_[HEAP]->{'REQUESTS'}->{ $_ }->[0]->set_output_filter(POE::Filter::Stream->new() ) ;
-               $response->is_streaming();
+               $response->is_streaming(1);
             }
             
             if ( DEBUG ) {
          		print "Sending stream via ".$response->{STREAM}." to $_ with id $id \n" ;
          	}
             
-            $kernel->yield($response->{STREAM}, $_[HEAP]->{'REQUESTS'}->{ $_ }->[0],$_[HEAP]->{'REQUESTS'}->{ $id }->[3], $_[HEAP]->{'RESPONSES'}->{$_}, $_ );
+            $kernel->yield(
+               $response->{STREAM},                   # callback event
+               $_[HEAP]->{'REQUESTS'}->{ $_ }->[0],   # wheel
+               $_[HEAP]->{'REQUESTS'}->{ $id }->[3],  # request
+               $_[HEAP]->{'RESPONSES'}->{$_},         # response
+               $_                                     # id
+            );
    	}
    }
 	# Success!
@@ -949,6 +976,10 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 			},
 		],
 
+		'LOGHANDLER' => { 'SESSION' => 'HTTP_GET',
+				  'EVENT'   => 'GOT_LOG',
+		},
+
 		# In the testing phase...
 		'SSLKEYCERT'	=>	[ 'public-key.pem', 'public-cert.pem' ],
 	) or die 'Unable to create the HTTP Server';
@@ -965,6 +996,7 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 			'GOT_ERROR'	=>	\&GOT_ERR,
 			'GOT_NULL'	=>	\&GOT_NULL,
 			'GOT_HANDLERS'	=>	\&GOT_HANDLERS,
+			'GOT_LOG'       =>      \&GOT_LOG,
 		},
 	);
 
@@ -1020,6 +1052,17 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 		# We are done!
 		# For speed, you could use $_[KERNEL]->call( ... )
 		$_[KERNEL]->post( 'HTTPD', 'DONE', $response );
+	}
+
+	sub GOT_LOG {
+		# ARG0 = HTTP::Request object, ARG1 = remote IP 
+		my ($request, $remote_ip) = @_[ARG0,ARG1];
+
+		# Do some sort of logging activity.
+
+       		warn join(' ', time(), $remote_ip, $request->uri ), "\n";
+
+		return;
 	}
 
 =head1 ABSTRACT
@@ -1130,6 +1173,22 @@ is a "catch-all" DIR regex like '.*', it will catch the errors, and only that on
 
 NOTE: The only way SimpleHTTP will leak memory ( hopefully heh ) is if you discard the SimpleHTTP::Response object without sending it
 back to SimpleHTTP via the DONE/CLOSE events, so never do that!
+
+=item C<LOGHANDLER>
+
+Expects a hashref with the following key, values:
+
+SESSION	->	The session to send the input
+
+EVENT	->	The event to trigger
+
+You will receive an event for each request to the server from clients.
+
+The event will have the following parameters:
+
+ARG0 -> HTTP::Request object
+
+ARG1 -> the IP address of the client
 
 =item C<SSLKEYCERT>
 
