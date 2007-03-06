@@ -7,7 +7,7 @@ use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
 # $Revision: 1181 $
-our $VERSION = '1.19';
+our $VERSION = '1.20';
 
 # Import what we need from the POE namespace
 use POE;
@@ -676,7 +676,9 @@ sub Got_Input {
 	# Add this response to the wheel
 	$_[HEAP]->{'REQUESTS'}->{ $id }->[2] = $response;
 	$_[HEAP]->{'REQUESTS'}->{ $id }->[3] = $request;
-
+	
+    # TODO we will have to check this call to the log handler so we don't get a hanging
+    # situation like below.
 	$_[KERNEL]->post(
 	   $_[HEAP]->{'LOGHANDLER'}->{'SESSION'},
 	   $_[HEAP]->{'LOGHANDLER'}->{'EVENT'},
@@ -695,6 +697,10 @@ sub Got_Input {
 						$response,
 						$handler->{'DIR'},
 			);
+            # Make sure we croak if we have an issue posting
+			croak("I had a problem posting to event $handler->{'EVENT'} of session $handler->{'SESSION'} for DIR handler '$handler->{'DIR'}'",
+			      ". As reported by Kernel: '$!', perhaps the session name is spelled incorrectly for this handler?")
+                if $!;
 
 			# All done!
 			return;
@@ -702,7 +708,10 @@ sub Got_Input {
 	}
 
 	# If we reached here, no handler was able to handle it...
-	die 'No handler was able to handle ' . $path;
+	# Set response code to 404 and tell the client we didn't find anything
+	$response->code( 404 );
+	$response->content('404 Not Found');
+	$_[KERNEL]->yield('DONE', $response);
 }
 
 # Finished with a request!
@@ -1168,7 +1177,7 @@ NOTE: The path is UNIX style, not MSWIN style ( /blah/foo not \blah\foo )
 
 Now, if you supply 100 handlers, how will SimpleHTTP know what to do? Simple! By passing in an array in the first place,
 you have already told SimpleHTTP the order of your handlers. They will be tried in order, and if a match is not found,
-SimpleHTTP will DIE!
+SimpleHTTP will return a 404 response.
 
 This allows some cool things like specifying 3 handlers with DIR of:
 '^/foo/.*', '^/$', '.*'
