@@ -7,7 +7,7 @@ use warnings FATAL => 'all';				# Enable warnings to catch errors
 
 # Initialize our version
 # $Revision: 1181 $
-our $VERSION = '1.20';
+our $VERSION = '1.21';
 
 # Import what we need from the POE namespace
 use POE;
@@ -589,7 +589,7 @@ sub Got_Input {
 	}
 
 	# The HTTP::Response object, the path
-	my ( $response, $path );
+	my ( $response, $path, $malformed_req );
 
 	# Check if it is HTTP::Request or Response
 	# Quoting POE::Filter::HTTPD
@@ -600,6 +600,9 @@ sub Got_Input {
 		# Make the request nothing
 		$response = $request;
 		$request = undef;
+		
+		# Mark that this is a malformed request
+		$malformed_req = 1;
 
 		# Hack it to simulate POE::Component::Server::SimpleHTTP::Response->new( $id, $conn );
 		bless( $response, 'POE::Component::Server::SimpleHTTP::Response' );
@@ -677,41 +680,59 @@ sub Got_Input {
 	$_[HEAP]->{'REQUESTS'}->{ $id }->[2] = $response;
 	$_[HEAP]->{'REQUESTS'}->{ $id }->[3] = $request;
 	
-    # TODO we will have to check this call to the log handler so we don't get a hanging
-    # situation like below.
+	# If they have a log handler registered, send out the needed information
+	# TODO if we received a malformed request, we will not have a request object
+	# We need to figure out what we're doing because they can't always expect to have
+	# a request object, or should we keep it from being ?undef'd?
 	$_[KERNEL]->post(
 	   $_[HEAP]->{'LOGHANDLER'}->{'SESSION'},
 	   $_[HEAP]->{'LOGHANDLER'}->{'EVENT'},
 	   $request,
 	   $response->connection->remote_ip(),
 	) if $_[HEAP]->{'LOGHANDLER'};
-
-	# Find which handler will handle this one
-	foreach my $handler ( @{ $_[HEAP]->{'HANDLERS'} } ) {
-		# Check if this matches
-		if ( $path =~ $handler->{'RE'} ) {
-			# Send this off!
-			$_[KERNEL]->post(	$handler->{'SESSION'},
-						$handler->{'EVENT'},
-						$request,
-						$response,
-						$handler->{'DIR'},
-			);
-            # Make sure we croak if we have an issue posting
-			croak("I had a problem posting to event $handler->{'EVENT'} of session $handler->{'SESSION'} for DIR handler '$handler->{'DIR'}'",
-			      ". As reported by Kernel: '$!', perhaps the session name is spelled incorrectly for this handler?")
-                if $!;
-
-			# All done!
-			return;
+	
+	# Warn if we had a problem dispatching to the log handler above
+	warn("I had a problem posting to event '",
+	     $_[HEAP]->{'LOGHANDLER'}->{'EVENT'},
+	     "' of the log handler alias '",
+	     $_[HEAP]->{'LOGHANDLE'}->{'SESSION'},
+          "'. As reported by Kernel: '$!', perhaps the alias is spelled incorrectly for this handler?")
+        if $!;
+	
+	
+	# If we received a malformed request then
+	# let's not try to dispatch to a handler
+	if( $malformed_req ) {
+        # Just push out the response we got from POE::Filter::HTTPD saying your request was bad
+        $_[KERNEL]->yield('DONE', $response);
+	} else {
+	   # Find which handler will handle this one
+		foreach my $handler ( @{ $_[HEAP]->{'HANDLERS'} } ) {
+			# Check if this matches
+			if ( $path =~ $handler->{'RE'} ) {
+				# Send this off!
+				$_[KERNEL]->post(	$handler->{'SESSION'},
+							$handler->{'EVENT'},
+							$request,
+							$response,
+							$handler->{'DIR'},
+				);
+            	# Make sure we croak if we have an issue posting
+				croak("I had a problem posting to event $handler->{'EVENT'} of session $handler->{'SESSION'} for DIR handler '$handler->{'DIR'}'",
+			      	". As reported by Kernel: '$!', perhaps the session name is spelled incorrectly for this handler?")
+                	if $!;
+	
+				# All done!
+				return;
+			}
 		}
-	}
 
-	# If we reached here, no handler was able to handle it...
-	# Set response code to 404 and tell the client we didn't find anything
-	$response->code( 404 );
-	$response->content('404 Not Found');
-	$_[KERNEL]->yield('DONE', $response);
+		# If we reached here, no handler was able to handle it...
+		# Set response code to 404 and tell the client we didn't find anything
+		$response->code( 404 );
+		$response->content('404 Not Found');
+        $_[KERNEL]->yield('DONE', $response);
+	}
 }
 
 # Finished with a request!
@@ -1087,8 +1108,14 @@ POE::Component::Server::SimpleHTTP - Perl extension to serve HTTP requests in PO
 		my ($request, $remote_ip) = @_[ARG0,ARG1];
 
 		# Do some sort of logging activity.
-
+		# If the request was malformed, $request = undef
+		# CHECK FOR A REQUEST OBJECT BEFORE USING IT.
+        if( $request ) {
+        {
        		warn join(' ', time(), $remote_ip, $request->uri ), "\n";
+        } else {
+       		warn join(' ', time(), $remote_ip, 'Bad request' ), "\n";
+        }
 
 		return;
 	}
@@ -1210,11 +1237,12 @@ SESSION	->	The session to send the input
 
 EVENT	->	The event to trigger
 
-You will receive an event for each request to the server from clients.
+You will receive an event for each request to the server from clients.  Malformed client requests will not be passed into the handler.  Instead
+undef will be passed.
 
 The event will have the following parameters:
 
-ARG0 -> HTTP::Request object
+ARG0 -> HTTP::Request object/undef if client request was malformed.
 
 ARG1 -> the IP address of the client
 
