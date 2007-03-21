@@ -1,6 +1,9 @@
 ---
 abstract: "Perl extension to serve HTTP requests in POE.\r"
 author: 'Apocalypse <APOCAL@cpan.org>'
+build_requires:
+  POE::Component::Client::HTTP: 0
+  Test::More: 0
 distribution_type: module
 generated_by: Module::Install version 0.65
 license: perl
@@ -21,4 +24,4 @@ requires:
   Socket: 0
   Storable: 0
   Sys::Hostname: 0
-version: 1.22
+version: 1.23
