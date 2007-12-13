@@ -4,7 +4,6 @@ author:
   - Apocalypse <APOCAL@cpan.org>
 build_requires: 
   LWP::UserAgent: 0
-  POE::Component::Client::HTTP: 0
   Test::More: 0.47
 distribution_type: module
 generated_by: Module::Install version 0.68
@@ -26,4 +25,4 @@ requires:
   Socket: 0
   Storable: 0
   Sys::Hostname: 0
-version: 1.27_01
+version: 1.27_02
