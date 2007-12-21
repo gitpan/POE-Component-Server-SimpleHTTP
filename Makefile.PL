@@ -19,6 +19,7 @@ requires    'HTTP::Response'   =>    0;
 
 build_requires   'Test::More'                   => 0.47;
 build_requires   'LWP::UserAgent'               =>    0;
+build_requires   'LWP::ConnCache'               =>    0;
 
 my $value = prompt( 'Do you want to test streaming ( requires POE::Component::Client::HTTP ) [y/N]?', 'N' );
 build_requires   'POE::Component::Client::HTTP' =>    0 if $value =~ /^Y$/i;
@@ -37,4 +38,9 @@ if ( $value =~ /^Y$/i ) {
    requires 'IPC::Shareable' => '0';
    build_requires   'POE::Component::Client::HTTP' =>    0;
 }
+
+# Sanity check
+eval { require IPC::Shareable; };
+build_requires 'POE::Component::Client::HTTP' =>    0 unless $@;
+
 WriteAll();

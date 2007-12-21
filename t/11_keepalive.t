@@ -3,7 +3,7 @@ use Test::More;
 
 #plan skip_all => 'MSWin32 does not have a proper fork()' if $^O eq 'MSWin32';
 
-plan tests => 22;
+plan tests => 18;
 
 use LWP::UserAgent;
 use LWP::ConnCache;
@@ -16,6 +16,7 @@ my $PORT = 2080;
 my $IP = "localhost";
 
 POE::Component::Server::SimpleHTTP->new(
+                'KEEPALIVE'     =>      1,
                 'ALIAS'         =>      'HTTPD',
                 'ADDRESS'       =>      "$IP",
                 'PORT'          =>      $PORT,
@@ -65,6 +66,7 @@ POE::Session->create(
 );
 $poe_kernel->run;
 exit 0;
+my $TESTS;
 
 sub _start_tests {
   my ($kernel,$heap) = @_[KERNEL,HEAP];
@@ -85,10 +87,12 @@ sub _close {
   delete $_[HEAP]->{_wheel};
   $poe_kernel->post( 'HTTPD', 'SHUTDOWN' );
   $poe_kernel->alias_remove( 'HTTP_GET' );
+  ok( $TESTS, "Got some test results" );
   return;
 }
 
 sub _stdout {
+  $TESTS++;
   ok( $_[ARG0]->{result}, $_[ARG0]->{test} );
   return;
 }
@@ -109,6 +113,7 @@ sub top
     $response->code(200);
     $response->content_type('text/plain');
     $response->content("this is top");
+    $response->header( 'X-CID', $response->connection->ID );
     $_[KERNEL]->post( 'HTTPD', 'DONE', $response );
 }
 
@@ -122,6 +127,7 @@ sub honk
     $response->code(200);
     $response->content_type('text/plain');
     $response->content("this is honk");
+    $response->header( 'X-CID', $response->connection->ID );
     $_[KERNEL]->post( 'HTTPD', 'DONE', $response );
 }
 
@@ -142,6 +148,7 @@ sub bonk
     fail( "bonk should never be called" );
     $response->code(200);
     $response->content_type('text/plain');
+    $response->header( 'X-CID', $response->connection->ID );
     $response->content("this is bonk");
     $_[KERNEL]->post( 'HTTPD', 'DONE', $response );
 }
@@ -152,6 +159,7 @@ sub bonk2
     my ($request, $response) = @_[ARG0, ARG1];
     $response->code(200);
     $response->content_type('text/html');
+    $response->header( 'X-CID', $response->connection->ID );
     $response->content(<<'    HTML');
 <html>
 <head><title>YEAH!</title></head>
@@ -170,7 +178,9 @@ sub _tests
 
     my $results = [ ];
     my $UA = LWP::UserAgent->new;
-    again:
+    my $CC = LWP::ConnCache->new();
+    $UA->conn_cache( $CC );
+
     my $req=HTTP::Request->new(GET => "http://$IP:$PORT/");
     my $resp=$UA->request($req);
 
@@ -178,6 +188,11 @@ sub _tests
     push @$results, { test => "got index", result => $resp->is_success };
     my $content=$resp->content;
     push @$results, { test => "got top index", result => $content =~ /this is top/ };
+    $CC->prune;
+    push @$results, { test => "one connection", 
+                      result => ( $CC->get_connections == 1 ) };
+
+    my $CID = $resp->header( 'X-CID' );
 
     $req=HTTP::Request->new(GET => "http://$IP:$PORT/honk/");
     $resp=$UA->request($req);
@@ -185,6 +200,11 @@ sub _tests
     push @$results, { test => "got something", result => $resp->is_success };
     $content=$resp->content;
     push @$results, { test => "something honked", result => $content =~ /this is honk/ };
+    $CC->prune;
+    push @$results, { test => "one connection", 
+                      result => ( $CC->get_connections == 1 ) };
+    push @$results, { test => "same connection ID", result => 
+                                ( $CID eq $resp->header( 'X-CID' ) ) };
 
     $req=HTTP::Request->new(GET => "http://$IP:$PORT/bonk/zip.html");
     $resp=$UA->request($req);
@@ -192,6 +212,11 @@ sub _tests
 			($resp->is_success and $resp->content_type eq 'text/html') };
     $content=$resp->content;
     push @$results, { test => "my friend", result => $content =~ /my friend/ };
+    $CC->prune;
+    push @$results, { test => "one connection", 
+                      result => ( $CC->get_connections == 1 ) };
+    push @$results, { test => "same connection ID", result => 
+                                ( $CID eq $resp->header( 'X-CID' ) ) };
     
     # Test for 404
     #diag('Test for 404');
@@ -201,12 +226,11 @@ sub _tests
     #is($resp->code, 404, "404 code returned from bad handler call, this is good.");
     push @$results, { test => "404 code returned from bad handler call, this is good.", 
 			result => ( $resp->code eq '404' ) };
+    sleep 1;
+    $CC->prune;
+    push @$results, { test => "Connection closed", 
+                      result => ( $CC->get_connections == 0 ) };
 
-    unless ($UA->conn_cache) {
-        #diag( "Enabling Keep-Alive and going again" );
-        $UA->conn_cache( LWP::ConnCache->new() );
-        goto again;
-    }
     my $replies = $filter->put( $results );
     print STDOUT @$replies;
     return;

@@ -7,7 +7,7 @@ BEGIN {
    plan skip_all => 'POE::Component::Client::HTTP is required for this test' if $@;
 }
 
-plan tests => 4;
+plan tests => 6;
 
 use HTTP::Request;
 use POE;
@@ -17,6 +17,8 @@ use Data::Dumper;
 
 my $PORT = 2080;
 my $IP = "localhost";
+
+our %STREAMS;
 
 ####################################################################
 POE::Component::Server::SimpleHTTP->new(
@@ -40,6 +42,7 @@ POE::Component::Client::HTTP->spawn(
          Protocol  => 'HTTP/1.1', 
          From      => 'test@tester',
          Streaming => 100,
+	 Proxy     => q{},
 );
 
 POE::Session->create(
@@ -55,10 +58,14 @@ POE::Session->create(
 		        keepalive    => \&keepalive,
 			response     => \&response,
 			'_shutdown'  => \&_shutdown,
+                        'on_close'   => \&on_close,
                 },   
 );
     
 $poe_kernel->run();
+
+is( 0+keys %STREAMS, 0, "No open streams" );
+
 exit 0;
 
 sub GOT_MAIN {
@@ -78,6 +85,11 @@ sub GOT_MAIN {
    );   
 
    $heap->{'count'} ||= 0;
+
+   my $c = $response->connection;
+   $STREAMS{ $c->ID }=1;
+
+   $_[KERNEL]->call( $_[SENDER], 'SETCLOSEHANDLER', $c, 'on_close', $c->ID );
     
     # We are done!
    $kernel->yield('GOT_STREAM', $response);
@@ -97,6 +109,8 @@ sub GOT_STREAM {
       POE::Kernel->post('HTTPD', 'STREAM', $response);
    }
    else {
+      $STREAMS{ $response->connection->ID }--;
+
       POE::Kernel->post('HTTPD', 'CLOSE', $response );
    }
    return;
@@ -163,3 +177,10 @@ sub response {
       }
       return;
 }
+
+sub on_close {
+    my( $wid ) = @_[ARG0];
+    is( $STREAMS{$wid}, 0, "on_close comes after CLOSE" );
+    delete $STREAMS{ $wid } if $STREAMS{ $wid } == 0;
+}
+

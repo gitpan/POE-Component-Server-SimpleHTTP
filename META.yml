@@ -3,6 +3,7 @@ abstract: Perl extension to serve HTTP requests in POE.
 author: 
   - Apocalypse <APOCAL@cpan.org>
 build_requires: 
+  LWP::ConnCache: 0
   LWP::UserAgent: 0
   Test::More: 0.47
 distribution_type: module
@@ -25,4 +26,4 @@ requires:
   Socket: 0
   Storable: 0
   Sys::Hostname: 0
-version: 1.28
+version: 1.30
