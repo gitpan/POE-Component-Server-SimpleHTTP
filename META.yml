@@ -27,6 +27,7 @@ requires:
   Socket: 0
   Storable: 0
   Sys::Hostname: 0
+  perl: 5.6.0
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.48
+version: 1.50
