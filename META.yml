@@ -5,6 +5,7 @@ author:
 build_requires:
   HTTP::Parser: 0.04
   Test::More: 0.47
+  Test::POE::Client::TCP: 0.1
 distribution_type: module
 generated_by: 'Module::Install version 0.77'
 license: perl
@@ -29,4 +30,4 @@ requires:
   perl: 5.6.0
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.53_01
+version: 1.53_02
