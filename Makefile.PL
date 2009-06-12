@@ -6,6 +6,7 @@ $ENV{PERL_MM_USE_DEFAULT}=1 if $Module::Install::AUTHOR;
 name 'POE-Component-Server-SimpleHTTP';
 author 'Apocalypse <APOCAL@cpan.org>';
 license 'perl';
+auto_license holder => 'Apocalypse, Chris Williams, Eriam Schaffter, Marlon Bailey and Philip Gwyn';
 perl_version '5.006';
 version_from 'lib/POE/Component/Server/SimpleHTTP.pm';
 abstract_from 'lib/POE/Component/Server/SimpleHTTP.pm';
@@ -19,6 +20,9 @@ requires    'Storable'         =>    0;
 requires    'Socket'           =>    0;
 requires    'HTTP::Request'    =>    0;
 requires    'HTTP::Response'   =>    0;
+requires    'Moose'	       =>    0.81;
+requires    'MooseX::AttributeHelpers' => 0;
+requires    'MooseX::POE'      =>    0.203;
 
 build_requires   'Test::More'                   => 0.47;
 build_requires	 'POE::Filter::HTTP::Parser'	=> 0.02;
@@ -43,10 +47,13 @@ if ( $value =~ /^Y$/i ) {
 }
 
 # Sanity check
-eval { require IPC::Shareable; };
-build_requires 'POE::Component::Client::HTTP' => 0.82 unless $@;
+build_requires 'POE::Component::Client::HTTP' => 0.82 if can_use 'IPC::Shareable';
 
 # Thanks to Matt Trout for this tip
-makemaker_args(dist => { PREOP => "$^X ./tools/svn-log.perl > ./Changes" });
+#makemaker_args(dist => { PREOP => "$^X ./tools/svn-log.perl > ./Changes" });
+makemaker_args(dist => { PREOP => "git --no-pager log --tags > ./Changes" });
+
+auto_provides;
+githubmeta;
 
 WriteAll();
