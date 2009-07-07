@@ -5,7 +5,7 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '1.99_01';
+$VERSION = '1.99_02';
 
 use POE;
 use POE::Wheel::SocketFactory;
@@ -20,6 +20,7 @@ use HTTP::Date qw( time2str );
 
 use POE::Component::Server::SimpleHTTP::Connection;
 use POE::Component::Server::SimpleHTTP::Response;
+use POE::Component::Server::SimpleHTTP::State;
 
 BEGIN {
 
@@ -188,12 +189,11 @@ sub BUILDARGS {
 }
 
 sub session_id {
-  return shift->get_session_id;
+  shift->get_session_id;
 }
 
 sub getsockname {
-   # This will need changing
-   $_[0]->{SOCKETFACTORY}->getsockname;
+  shift->_factory->getsockname;
 }
 
 sub shutdown {
@@ -201,7 +201,6 @@ sub shutdown {
    $poe_kernel->call( $self->get_session_id, 'SHUTDOWN', @_ );
 }
 
-# Refactor this probably will become STOP
 # This subroutine, when SimpleHTTP exits, will search for leaks
 sub STOP {
    my $self = $_[OBJECT];
@@ -212,7 +211,7 @@ sub STOP {
       warn 'Did not get DONE/CLOSE event for Wheel ID ' 
         . $req
         . ' from IP '
-        . $self->_requests->{$req}->[2]->connection->remote_ip;
+        . $self->_requests->{$req}->response->connection->remote_ip;
    }
 
    # All done!
@@ -265,13 +264,12 @@ event 'SHUTDOWN' => sub {
    foreach my $S ( $self->_requests, $self->_connections ) {
       foreach my $conn ( keys %$S ) {
 
-   # Can't call method "shutdown_input" on an undefined value at
-   # /usr/lib/perl5/site_perl/5.8.2/POE/Component/Server/SimpleHTTP.pm line 323.
-         if (   defined $S->{$conn}->[0]
-            and defined $S->{$conn}->[0]->get_input_handle() )
+         # Can't call method "shutdown_input" on an undefined value at
+         # /usr/lib/perl5/site_perl/5.8.2/POE/Component/Server/SimpleHTTP.pm line 323.
+         if (   defined $S->{$conn}->wheel
+            and defined $S->{$conn}->wheel->get_input_handle() )
          {
-            $S->{$conn}->[0]->shutdown_input;
-            $S->{$conn}->[0]->shutdown_output;
+            $S->{$conn}->close_wheel;
          }
 
          # Delete this request
@@ -468,8 +466,6 @@ sub MassageHandlers {
 # The actual manager of connections
 event 'got_connection' => sub {
    my ($kernel,$self,$socket,$peeraddr,$peerport) = @_[KERNEL,OBJECT,ARG0..ARG2];
-   my $sockaddr = inet_ntoa( ( unpack_sockaddr_in ( CORE::getsockname $socket ) )[1] );
-   my $sockport = ( unpack_sockaddr_in ( CORE::getsockname $socket ) )[0];
 
 
    # Should we SSLify it?
@@ -490,8 +486,6 @@ event 'got_connection' => sub {
    my $wheel = POE::Wheel::ReadWrite->new(
       Handle       => $socket,
       Filter  => POE::Filter::HTTPD->new(),
-#      InputFilter  => POE::Filter::HTTPD->new(),
-#      OutputFilter => POE::Filter::HTTPD->new(),
       InputEvent   => 'got_input',
       FlushedEvent => 'got_flush',
       ErrorEvent   => 'got_error',
@@ -505,8 +499,9 @@ event 'got_connection' => sub {
    }
 
    # Save this wheel!
-   # 0 = wheel, 1 = Output done?, 2 = SimpleHTTP::Response object
-   $self->_requests->{ $wheel->ID } = [ $wheel, 0, undef ];
+   # 0 = wheel, 1 = Output done?, 2 = SimpleHTTP::Response object, 3 == request, 4 == streaming?
+   $self->_requests->{ $wheel->ID } = 
+	POE::Component::Server::SimpleHTTP::State->new( wheel => $wheel );
 
    # Debug stuff
    if (DEBUG) {
@@ -524,22 +519,26 @@ event 'got_input' => sub {
    my ($kernel,$self,$request,$id) = @_[KERNEL,OBJECT,ARG0,ARG1];
    my $connection;
 
+   # This whole thing is a mess. Keep-Alive was bolted on and it
+   # shows. Streaming is unpredictable. There are checks everywhere
+   # because it leaks wheels. *sigh*
+
    # Was this request Keep-Alive?
    if ( $self->_connections->{$id} ) {
-      my $c = delete $self->_connections->{$id};
-      $self->_requests->{$id} = [ $c->[0], 0, undef ];
-      $connection = $c->[1];
+      my $state = delete $self->_connections->{$id};
+      $state->reset;
+      $connection = $state->connection;
+      $state->clear_connection;
+      $self->_requests->{$id} = $state;
       warn "Keep-alive id=$id next request..." if DEBUG;
    }
 
    # Quick check to see if the socket died already...
    # Initially reported by Tim Wood
-   unless ( defined $self->_requests->{$id}->[0] and 
-      $self->_requests->{$id}->[0]->get_input_handle() ) {
-
+   unless ( $self->_requests->{$id}->wheel_alive ) {
       warn 'Got a request, but socket died already!' if DEBUG;
       # Destroy this wheel!
-      delete $self->_requests->{$id}->[0];
+      $self->_requests->{$id}->close_wheel;
       delete $self->_requests->{$id};
       return;
    }
@@ -553,12 +552,12 @@ event 'got_input' => sub {
      if ( $self->sslkeycert ) {
         $connection = POE::Component::Server::SimpleHTTP::Connection->new(
             SSLify_GetSocket(
-               $self->_requests->{$id}->[0]->get_input_handle() )
+               $self->_requests->{$id}->wheel->get_input_handle() )
         );
         last SWITCH;
       }
       $connection = POE::Component::Server::SimpleHTTP::Connection->new(
-         $self->_requests->{$id}->[0]->get_input_handle()
+         $self->_requests->{$id}->wheel->get_input_handle()
       );
    }
 
@@ -622,7 +621,7 @@ event 'got_input' => sub {
       # Debug stuff
       warn "could not make connection object" if DEBUG;
       # Destroy this wheel!
-      delete $self->_requests->{$id}->[0];
+      $self->_requests->{$id}->close_wheel;
       delete $self->_requests->{$id};
       return;
    }
@@ -633,13 +632,13 @@ event 'got_input' => sub {
 
       # Put the cipher type for people who want it
       $response->connection->sslcipher(
-           SSLify_GetCipher( $self->_requests->{$id}->[0]->get_input_handle() )
+           SSLify_GetCipher( $self->_requests->{$id}->wheel->get_input_handle() )
       );
    }
 
    # Add this response to the wheel
-   $self->_requests->{$id}->[2] = $response;
-   $self->_requests->{$id}->[3] = $request;
+   $self->_requests->{$id}->set_response( $response );
+   $self->_requests->{$id}->set_request( $request );
    $response->connection->ID($id);
 
    # If they have a log handler registered, send out the needed information
@@ -714,36 +713,33 @@ event 'got_input' => sub {
 event 'got_flush' => sub {
    my ($kernel,$self,$id) = @_[KERNEL,OBJECT,ARG0];
 
+   return unless defined $self->_requests->{$id};
+
    # Debug stuff
    warn "Got Flush event for wheel ID ( $id )" if DEBUG;
 
-   if ( $self->_requests->{$id}->[1] == 2 ) {
+   if ( $self->_requests->{$id}->streaming ) {
       # Do the stream !
       warn "Streaming in progress ...!" if DEBUG;
       return;
    }
 
    # Check if we are shutting down
-   if ( $self->_requests->{$id}->[1] == 1 ) {
+   if ( $self->_requests->{$id}->done ) {
 
       if ( $self->must_keepalive( $id ) ) {
          warn "Keep-alive id=$id ..." if DEBUG;
-         $self->_connections->{$id} = [
-            $self->_requests->{$id}->[0],    # wheel
-            $self->_requests->{$id}->[2]->connection
-         ];
+	 my $state = delete $self->_requests->{$id};
+	 $state->set_connection( $state->response->connection );
+	 $state->reset;
+         $self->_connections->{$id} = $state;
       }
       else {
-
          # Shutdown read/write on the wheel
-         $self->_requests->{$id}->[0]->shutdown_input();
-         $self->_requests->{$id}->[0]->shutdown_output();
+         $self->_requests->{$id}->close_wheel;
+         delete $self->_requests->{$id};
       }
 
-      # Delete the wheel
-      # Tracked down by Paul Visscher
-      delete $self->_requests->{$id}->[0];
-      delete $self->_requests->{$id};
    }
    else {
 
@@ -775,8 +771,8 @@ sub must_keepalive {
 
    return unless $self->keepalive;
 
-   my $resp = $self->_requests->{$id}->[2];
-   my $req  = $self->_requests->{$id}->[3];
+   my $resp = $self->_requests->{$id}->response;
+   my $req  = $self->_requests->{$id}->request;
 
    # error = close
    return 0 if $resp->is_error;
@@ -810,16 +806,18 @@ event 'got_error' => sub {
       my $connection;
       if ( $self->_connections->{$id} ) {
          my $c = delete $self->_connections->{$id};
-         $connection = $c->[1];
-         delete $c->[0];
+         $connection = $c->connection;
+         $c->close_wheel;
       }
       else {
-         $connection = $self->_requests->{$id}->[2]->connection;
+         $connection = $self->_requests->{$id}->response->connection;
 
          # Delete this connection
-         delete $self->_requests->{$id}->[0];
-         delete $self->_requests->{$id};
+         $self->_requests->{$id}->close_wheel;
       }
+
+      delete $self->_requests->{$id};
+      delete $self->_responses->{$id};
 
       # Mark the client dead
       $connection->dead(1);
@@ -864,16 +862,14 @@ event 'DONE' => sub {
 
 
    # Check if we have already sent the response
-   if ( $self->_requests->{$id}->[1] == 1 ) {
+   if ( $self->_requests->{$id}->done ) {
       # Tried to send twice!
       die 'Tried to send a response to the same connection twice!';
    }
 
    # Quick check to see if the wheel/socket died already...
    # Initially reported by Tim Wood
-   if (  !defined $self->_requests->{$id}->[0] or 
-      !defined $self->_requests->{$id}->[0]->get_input_handle() )
-   {
+   unless ( $self->_requests->{$id}->wheel_alive ) {
       warn 'Tried to send data over a closed/nonexistant socket!' if DEBUG;
       $kernel->post(
          $self->errorhandler->{SESSION},
@@ -885,10 +881,11 @@ event 'DONE' => sub {
 
    # Check if we were streaming. 
 
-   if ( $self->_requests->{$id}->[1] == 2 ) {
-      # Need to tidy up the wheel
-      my $wheel = $self->_requests->{$id}->[0];
-      $wheel->set_output_filter( $wheel->get_input_filter );
+   if ( $self->_requests->{$id}->streaming ) {
+      $self->_requests->{$id}->set_streaming(0);
+      $self->_requests->{$id}->set_done(1); # Finished streaming
+      # TODO: We might not get a flush, trigger it ourselves.
+      $kernel->yield( 'got_flush', $id );
       return;
    }
    
@@ -896,10 +893,10 @@ event 'DONE' => sub {
    $self->fix_headers( $response );
 
    # Send it out!
-   $self->_requests->{$id}->[0]->put($response);
+   $self->_requests->{$id}->wheel->put($response);
 
    # Mark this socket done
-   $self->_requests->{$id}->[1] = 1;
+   $self->_requests->{$id}->set_done(1);
 
    # Log FINALLY If they have a logFinal handler registered, send out the needed information
    if ( $self->log2handler and scalar keys %{ $self->log2handler } == 2 ) {
@@ -983,9 +980,7 @@ event 'STREAM' => sub {
 
    # Quick check to see if the wheel/socket died already...
    # Initially reported by Tim Wood
-   if (  !defined $self->_requests->{$id}->[0] or 
-      !defined $self->_requests->{$id}->[0]->get_input_handle() )
-   {
+   unless (  $self->_requests->{$id}->wheel_alive ) {
       warn 'Tried to send data over a closed/nonexistant socket!' if DEBUG;
       $kernel->post(
          $self->errorhandler->{SESSION},
@@ -1001,10 +996,8 @@ event 'STREAM' => sub {
    unless ( defined $response->IS_STREAMING ) {
 
       # Mark this socket done
-      $self->_requests->{$id}->[1] = 2;
-
-      #
-      $response->IS_STREAMING(1);
+      $self->_requests->{$id}->set_streaming(1);
+      $response->set_streaming(1);
    }
 
    if (DEBUG) {
@@ -1015,12 +1008,12 @@ event 'STREAM' => sub {
    }
 
    if ( $self->_chunkcount->{$id} > 1 ) {
-      my $wheel = $self->_requests->{ $response->_WHEEL }->[0];
+      my $wheel = $self->_requests->{ $response->_WHEEL }->wheel;
       $wheel->set_output_filter( POE::Filter::Stream->new() );
       $wheel->put( $response->content );
    }
    else {
-      my $wheel = $self->_requests->{ $response->_WHEEL }->[0];
+      my $wheel = $self->_requests->{ $response->_WHEEL }->wheel;
       $wheel->set_output_filter( $wheel->get_input_filter() );
       $wheel->put($response);
    }
@@ -1063,7 +1056,7 @@ sub fix_headers {
    }
 
    if ( !$response->protocol ) {
-      my $request = $self->_requests->{ $response->_WHEEL }->[3];
+      my $request = $self->_requests->{ $response->_WHEEL }->request;
       return unless $request and $request->isa('HTTP::Request');
       unless ( $request->method eq 'HEAD' ) {
          $response->protocol( $request->protocol );
@@ -1087,8 +1080,7 @@ event 'CLOSE' => sub {
    my $id = $response->_WHEEL;
 
    if ( $self->_connections->{$id} ) {
-      my $c = delete $self->_connections->{$id};
-      $self->_requests->{$id} = [ $c->[0], 0, undef ];
+      $self->_requests->{$id} = delete $self->_connections->{$id};
    }
 
    # Check if the wheel exists ( sometimes it gets closed by the client, but the application doesn't know that... )
@@ -1100,16 +1092,11 @@ event 'CLOSE' => sub {
    }
 
    # Kill it!
-   if (   defined $self->_requests->{$id}->[0]
-      and defined $self->_requests->{$id}->[0]->get_input_handle() ) {
-      $self->_requests->{$id}->[0]->shutdown_input;
-      $self->_requests->{$id}->[0]->shutdown_output;
-   }
+   $self->_requests->{$id}->close_wheel if $self->_requests->{$id}->wheel_alive;
 
    # Delete it!
-   delete $self->_requests->{$id}->[0];
    delete $self->_requests->{$id};
-   delete $self->_requests->{$id};
+   delete $self->_responses->{$id};
 
    warn 'Delete references to the connection done.' if DEBUG;
 
@@ -1133,12 +1120,12 @@ event 'SETCLOSEHANDLER' => sub {
    unless ( ref $connection ) {
       my $id = $connection;
       if ( $self->_connections->{$id} ) {
-         $connection = $self->_connections->{$id}->[1];
+         $connection = $self->_connections->{$id}->connection;
       }
       elsif ($self->_requests->{$id}
-         and $self->_requests->{$id}->[2] )
+         and $self->_requests->{$id}->response )
       {
-         $connection = $self->_requests->{$id}->[2]->connection;
+         $connection = $self->_requests->{$id}->response->connection;
       }
       unless ( ref $connection ) {
          die "Can't find connection object for request $id";

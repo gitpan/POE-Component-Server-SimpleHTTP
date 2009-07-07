@@ -3,7 +3,7 @@ package POE::Component::Server::SimpleHTTP::Response;
 use strict;
 use warnings;
 
-our $VERSION = '1.99_01';
+our $VERSION = '1.99_02';
 
 use base qw( HTTP::Response );
 
@@ -26,8 +26,16 @@ has 'STREAM' => (
   is => 'rw',
 );
 
+has 'STREAM_DONE' => (
+  is => 'ro',
+  default => sub { 0 },
+  writer => 'set_stream_done',
+  init_arg => undef,
+);
+
 has 'IS_STREAMING' => (
-  is => 'rw',
+  is => 'ro',
+  writer => 'set_streaming',
 );
 
 has 'DONT_FLUSH' => (
