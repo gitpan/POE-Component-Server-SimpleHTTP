@@ -5,7 +5,7 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '2.04';
+$VERSION = '2.06';
 
 use POE;
 use POE::Wheel::SocketFactory;
@@ -921,7 +921,7 @@ event 'DONE' => sub {
       $kernel->call(
          $self->log2handler->{'SESSION'},
          $self->log2handler->{'EVENT'},
-         $self->_requests->{$id}[3], $response
+         $self->_requests->{$id}->request, $response
       );
 
       # Warn if we had a problem dispatching to the log handler above
