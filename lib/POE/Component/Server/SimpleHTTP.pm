@@ -5,7 +5,7 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '2.06';
+$VERSION = '2.08';
 
 use POE;
 use POE::Wheel::SocketFactory;
@@ -837,7 +837,7 @@ event 'got_error' => sub {
       delete $self->_responses->{$id};
 
       # Mark the client dead
-      $connection->dead(1);
+      $connection->dead(1) if $connection;
    }
 
    # Success!

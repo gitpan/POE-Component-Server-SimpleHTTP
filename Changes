@@ -1,4 +1,49 @@
 ==============================
+2011-01-12 20:05:05 +0000 2.08
+==============================
+
+  commit 16849949bbe6b539d549bd7d5713f49441c64471
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Wed Jan 12 20:05:05 2011 +0000
+  
+    Bumper version
+
+  commit eeb9dd8ee9741a6ec363a2d2cdb1667ce2048488
+  Author: Ed Heil <ed@donor.com>
+  Date:   Wed Jan 12 20:03:10 2011 +0000
+  
+    [PATCH] possible issue with connections RT #64718
+
+    In using POE::Component::Server::SimpleHTTP v. 2.06, we've come
+    across a problem with error messages such as:
+
+    Can't call method "dead" on an undefined value at
+    [...]/POE/Component/Server/SimpleHTTP.pm line 840.
+
+    The line is:
+
+    # Mark the client dead
+
+    $connection->dead(1);
+
+    This happens when our load balancer makes a check to make sure the
+    port is open where the SimpleHTTP server is listening.
+
+    We've fixed it with:
+
+    # Mark the client dead
+
+    $connection->dead(1) if $connection;
+
+    I'm afraid at this point I haven't got the ability to do the
+    low-level debugging necessary to determine exactly how $connection
+    comes to be undef, or whether this is the best way to accomplish the
+    fix in the big picture, but I wanted to share the fix in case you
+    found it useful.
+
+    Signed-off-by: Chris 'BinGOs' Williams <chris@bingosnet.co.uk> 
+
+==============================
 2010-12-03 23:50:53 +0000 2.06
 ==============================
 
