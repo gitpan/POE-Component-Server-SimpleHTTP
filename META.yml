@@ -4,7 +4,7 @@ author:
   - 'Apocalypse <APOCAL@cpan.org>'
 build_requires:
   ExtUtils::MakeMaker: 6.42
-  POE::Filter::HTTP::Parser: 0.02
+  POE::Filter::HTTP::Parser: 1.06
   Test::More: 0.47
   Test::POE::Client::TCP: 0.1
 configure_requires:
@@ -24,16 +24,16 @@ no_index:
 provides:
   POE::Component::Server::SimpleHTTP:
     file: lib/POE/Component/Server/SimpleHTTP.pm
-    version: 2.08
+    version: 2.10
   POE::Component::Server::SimpleHTTP::Connection:
     file: lib/POE/Component/Server/SimpleHTTP/Connection.pm
-    version: 2.08
+    version: 2.10
   POE::Component::Server::SimpleHTTP::Response:
     file: lib/POE/Component/Server/SimpleHTTP/Response.pm
-    version: 2.08
+    version: 2.10
   POE::Component::Server::SimpleHTTP::State:
     file: lib/POE/Component/Server/SimpleHTTP/State.pm
-    version: 2.08
+    version: 2.10
 requires:
   Carp: 0
   HTTP::Date: 0
@@ -51,4 +51,4 @@ resources:
   homepage: http://github.com/bingos/poe-component-server-simplehttp/tree
   license: http://dev.perl.org/licenses/
   repository: git://github.com/bingos/poe-component-server-simplehttp.git
-version: 2.08
+version: 2.10
