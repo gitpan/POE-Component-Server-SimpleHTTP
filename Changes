@@ -1,4 +1,50 @@
 ==============================
+2011-05-14 11:13:32 +0100 2.12
+==============================
+
+  commit b0992bad00d249173ee5ff8b156fcf345156dd61
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Sat May 14 11:13:32 2011 +0100
+  
+    Bump version
+
+  commit 56f65f688bb69c6a222b9d43fff71babd5df683e
+  Author: Adrian Yee <adrian@gt.net>
+  Date:   Sat May 14 10:59:45 2011 +0100
+  
+    [RT #67951] Patch: Keep alive connections aren't reset properly after
+    streaming
+
+    Ticket <URL: https://rt.cpan.org/Ticket/Display.html?id=67951 >
+
+    If keep-alives are enabled and streaming is used, the connection
+    state isn't reset properly causing the wrong output on subsequent
+    requests.
+
+    Signed-off-by: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+
+  commit abf359178399cbeb32522853690abd797e91dfcd
+  Author: Adrian Yee <adrian@gt.net>
+  Date:   Sat May 14 10:53:51 2011 +0100
+  
+    [RT #67949] Patch: Connection closes before last flush while
+    streaming
+
+    Ticket <URL: https://rt.cpan.org/Ticket/Display.html?id=67949 >
+
+    Since the pod isn't complete for how to properly stream, I'm not 100%
+    sure this patch is correct, but here goes anyways.
+
+    After you've completed streaming and you call DONE, it always yields
+    got_flush regardless if POE::Wheel::ReadWrite has something left in
+    its buffer to flush. Executing the got_flush event when it has data
+    left in its buffer leads to SimpleHTTP resetting/closing the
+    connection prematurely. This patch fixes it by allowing ReadWrite to
+    flush the last chunk itself.
+
+    Signed-off-by: Chris 'BinGOs' Williams <chris@bingosnet.co.uk> 
+
+==============================
 2011-03-08 00:28:07 +0000 2.10
 ==============================
 

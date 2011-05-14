@@ -5,7 +5,7 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '2.10';
+$VERSION = '2.12';
 
 use POE;
 use POE::Wheel::SocketFactory;
@@ -744,6 +744,8 @@ event 'got_flush' => sub {
 	 $state->set_connection( $state->response->connection );
 	 $state->reset;
          $self->_connections->{$id} = $state;
+         delete $self->_chunkcount->{$id};
+         delete $self->_responses->{$id};
       }
       else {
          # Shutdown read/write on the wheel
@@ -902,7 +904,9 @@ event 'DONE' => sub {
       $self->_requests->{$id}->set_streaming(0);
       $self->_requests->{$id}->set_done(1); # Finished streaming
       # TODO: We might not get a flush, trigger it ourselves.
-      $kernel->yield( 'got_flush', $id );
+      if ( !$self->_requests->{$id}->wheel->get_driver_out_messages ) {
+         $kernel->yield( 'got_flush', $id );
+      }
       return;
    }
    
