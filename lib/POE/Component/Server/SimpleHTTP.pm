@@ -5,7 +5,7 @@ use warnings;
 
 use vars qw($VERSION);
 
-$VERSION = '2.12';
+$VERSION = '2.14';
 
 use POE;
 use POE::Wheel::SocketFactory;
@@ -645,6 +645,12 @@ event 'got_input' => sub {
       $response->connection->sslcipher(
            SSLify_GetCipher( $self->_requests->{$id}->wheel->get_input_handle() )
       );
+   }
+
+   if ( !defined( $request ) ) {
+      $self->_requests->{$id}->close_wheel;
+      delete $self->_requests->{$id};
+      return;
    }
 
    # Add this response to the wheel

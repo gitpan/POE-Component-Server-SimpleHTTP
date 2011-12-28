@@ -1,4 +1,22 @@
 ==============================
+2011-12-28 11:41:15 +0000 2.14
+==============================
+
+  commit e890e99cdfb6463dd4ddee9c1ce4ff822e540dc4
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Wed Dec 28 11:41:15 2011 +0000
+  
+    Bump to version 2.14
+
+  commit 7b003a8999684b509522c2fe443e14a38137a789
+  Author: Thorsten Schwinn <ts@espionage.de>
+  Date:   Wed Dec 28 11:38:52 2011 +0000
+  
+    Resolve crash with bad http request
+
+    Signed-off-by: Chris 'BinGOs' Williams <chris@bingosnet.co.uk> 
+
+==============================
 2011-05-14 11:13:32 +0100 2.12
 ==============================
 
