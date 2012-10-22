@@ -3,15 +3,15 @@ abstract: 'Perl extension to serve HTTP requests in POE.'
 author:
   - 'Apocalypse <APOCAL@cpan.org>'
 build_requires:
-  ExtUtils::MakeMaker: 6.62
+  ExtUtils::MakeMaker: 6.59
   POE::Filter::HTTP::Parser: 1.06
   Test::More: 0.47
   Test::POE::Client::TCP: 0.1
 configure_requires:
-  ExtUtils::MakeMaker: 6.62
+  ExtUtils::MakeMaker: 6.59
 distribution_type: module
 dynamic_config: 1
-generated_by: 'Module::Install version 1.04'
+generated_by: 'Module::Install version 1.06'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -25,16 +25,16 @@ no_index:
 provides:
   POE::Component::Server::SimpleHTTP:
     file: lib/POE/Component/Server/SimpleHTTP.pm
-    version: 2.14
+    version: 2.16
   POE::Component::Server::SimpleHTTP::Connection:
     file: lib/POE/Component/Server/SimpleHTTP/Connection.pm
-    version: 2.14
+    version: 2.16
   POE::Component::Server::SimpleHTTP::Response:
     file: lib/POE/Component/Server/SimpleHTTP/Response.pm
-    version: 2.14
+    version: 2.16
   POE::Component::Server::SimpleHTTP::State:
     file: lib/POE/Component/Server/SimpleHTTP/State.pm
-    version: 2.14
+    version: 2.16
 requires:
   Carp: 0
   HTTP::Date: 0
@@ -55,4 +55,4 @@ resources:
     type: git
     url: git://github.com/bingos/poe-component-server-simplehttp.git
     web: https://github.com/bingos/poe-component-server-simplehttp/tree
-version: 2.14
+version: 2.16
