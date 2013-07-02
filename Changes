@@ -1,4 +1,20 @@
 ==============================
+2013-07-02 21:30:49 +0100 2.18
+==============================
+
+  commit b09281bb3701530b072356b94cac20a794ea907b
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Tue Jul 2 21:30:49 2013 +0100
+  
+    Bump to version 2.18
+
+  commit 12c3469f10017d3778a34751fd2f0bc5cd64dd85
+  Author: Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+  Date:   Tue Jul 2 21:24:04 2013 +0100
+  
+    Don't use MooseX::AttributeHelpers anymore 
+
+==============================
 2012-10-22 10:10:15 +0100 2.16
 ==============================
 

@@ -25,23 +25,22 @@ no_index:
 provides:
   POE::Component::Server::SimpleHTTP:
     file: lib/POE/Component/Server/SimpleHTTP.pm
-    version: 2.16
+    version: 2.18
   POE::Component::Server::SimpleHTTP::Connection:
     file: lib/POE/Component/Server/SimpleHTTP/Connection.pm
-    version: 2.16
+    version: 2.18
   POE::Component::Server::SimpleHTTP::Response:
     file: lib/POE/Component/Server/SimpleHTTP/Response.pm
-    version: 2.16
+    version: 2.18
   POE::Component::Server::SimpleHTTP::State:
     file: lib/POE/Component/Server/SimpleHTTP/State.pm
-    version: 2.16
+    version: 2.18
 requires:
   Carp: 0
   HTTP::Date: 0
   HTTP::Request: 0
   HTTP::Response: 0
-  Moose: 0.81
-  MooseX::AttributeHelpers: 0
+  Moose: 0.9
   MooseX::POE: 0.205
   POE: 1.0000
   Socket: 0
@@ -51,8 +50,5 @@ requires:
 resources:
   homepage: https://github.com/bingos/poe-component-server-simplehttp/tree
   license: http://dev.perl.org/licenses/
-  repository:
-    type: git
-    url: git://github.com/bingos/poe-component-server-simplehttp.git
-    web: https://github.com/bingos/poe-component-server-simplehttp/tree
-version: 2.16
+  repository: git://github.com/bingos/poe-component-server-simplehttp.git
+version: 2.18
